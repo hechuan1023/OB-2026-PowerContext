@@ -372,6 +372,24 @@ _STATEMENT_HEADINGS = {
 }
 
 
+def _statement_title_quality(body: str, kind: str) -> int:
+    """Identify actual table titles, including wrapped titles, rather than prose mentions.
+
+    Annual reports can include numerous subsidiary statements and contents entries.
+    Prefer the consolidated statements for a question about the reporting company.
+    """
+
+    normalized = "\n".join(" ".join(line.casefold().split()) for line in body.splitlines())
+    title = re.compile(
+        r"^(?:(?:consolidated|combined|condensed|unaudited|audited)\s+)*"
+        rf"(?:{_STATEMENT_HEADINGS[kind].pattern})"
+        r"(?:\s+and\s+(?:other\s+)?comprehensive\s+(?:income|loss))?"
+        r"(?:\s*\((?:continued|unaudited|audited|loss)\))*$",
+        re.MULTILINE,
+    )
+    return max((2 if "consolidated" in match[0].split() else 1 for match in title.finditer(normalized)), default=0)
+
+
 def _statement_kinds(question: str) -> tuple[str, ...]:
     words = set(_WORDS.findall(question.casefold()))
     kinds: list[str] = []
@@ -499,6 +517,7 @@ def _rank_pages(
     query_words = set(_WORDS.findall(question.casefold()))
     statement_kinds = _statement_kinds(question)
     scores = []
+    titles: dict[tuple[str, str, str], dict[str, int]] = {}
     for hit, counts in zip(hits, terms, strict=True):
         length = sum(counts.values())
         score = 0.0
@@ -514,13 +533,27 @@ def _rank_pages(
         entity_overlap = len((document_terms - {"10", "k", "annual", "report"}) & query_words)
         compact_body = " ".join(_WORDS.findall(body.casefold()))
         phrase_score = sum(0.8 for phrase in phrases if phrase in compact_body)
-        heading = " ".join(body.casefold().split())[:240]
-        statement_score = 8.0 * sum(bool(_STATEMENT_HEADINGS[kind].search(heading)) for kind in statement_kinds)
         identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
+        titles[identity] = {kind: _statement_title_quality(body, kind) for kind in statement_kinds}
+        statement_score = 8.0 * sum(bool(quality) for quality in titles[identity].values())
         score = (score + phrase_score + statement_score) * (1.0 + 0.5 * entity_overlap) + 4.0 * votes.get(identity, 0.0)
         scores.append((score, hit))
     scores.sort(key=lambda item: (-item[0], item[1].memory_ref.artifact_id, item[1].entry_id))
-    return [hit for _, hit in scores]
+    ranked = [hit for _, hit in scores]
+    anchors: list[MemoryHit] = []
+    # A compound question needs complementary pages. One high-frequency aspect
+    # must not consume the whole result budget and crowd out another statement.
+    for kind in statement_kinds:
+        quality = max((value[kind] for value in titles.values()), default=0)
+        if quality:
+            best = next(
+                hit
+                for hit in ranked
+                if titles[(hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)][kind] == quality
+            )
+            if best not in anchors:
+                anchors.append(best)
+    return anchors + [hit for hit in ranked if hit not in anchors]
 
 
 async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple[MemoryCitation, ...]:

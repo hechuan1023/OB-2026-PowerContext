@@ -297,3 +297,62 @@ def test_target_company_pages_are_not_displaced_by_another_reports_keyword_densi
                 assert expected[entry.sources[0].source_id] == "ALPHA_2025_10K"
 
     asyncio.run(run())
+
+
+def test_compound_question_recalls_each_statement_among_many_subsidiary_tables(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'statements.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        bodies = (
+            "Meridian Industries and its subsidiaries\n" * 8
+            + "Consolidated\nStatement\nof\nIncome\nNet revenue 800. Operating profit 96.",
+            "Consolidated\nStatement of Cash Flows\n(Unaudited)\n"
+            "Depreciation and amortization 12. Capital expenditures 9.",
+            *(
+                f"Subsidiary {number}\nStatement of Cash Flows\n"
+                "Operating income is reconciled with depreciation and amortization. "
+                "Cash flows include capital expenditures and operating activities. "
+                "EBITDA less capex is an investment analyst measure."
+                for number in range(24)
+            ),
+            "Table of Contents\nConsolidated Statement of Income 1\nConsolidated Statement of Cash Flows 2\n"
+            "EBITDA operating income depreciation and amortization capex.",
+        )
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Statements", summary="Evidence", idempotency_key="statements")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, text in enumerate(bodies, start=1):
+                source = await registry.resolve(
+                    PDFPageInput(
+                        document_id="MERIDIAN_2025_10K", document_sha256="a" * 64, page_number=number, text=text
+                    )
+                )
+                locations[source.name] = number
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            found = await search_pdf_pages(
+                memory,
+                "What is Meridian's 2025 EBITDA less capex using operating income, depreciation and amortization "
+                "from the income statement and cash flow statement?",
+                limit=20,
+            )
+            returned = []
+            for citation in found:
+                entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                returned.append(locations[entry.sources[0].source_id])
+            assert len(returned) == len(set(returned)) == 20
+            assert {1, 2} <= set(returned)
+
+    asyncio.run(run())
