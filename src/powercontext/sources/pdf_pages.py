@@ -33,6 +33,33 @@ from powercontext.sources.models import Source, SourceMaterialization
 from powercontext.sources.projections import TEXT_EVIDENCE_PROJECTION_KEY, TextEvidence
 
 _WORDS = re.compile(r"[a-z]+|\d+")
+_DOCUMENT_GENERIC_WORDS = frozenset([
+    "annual",
+    "report",
+    "financial",
+    "statements",
+    "form",
+    "10",
+    "k",
+    "q",
+    "8",
+    "20",
+    "f",
+    "pdf",
+    "inc",
+    "incorporated",
+    "corp",
+    "corporation",
+    "company",
+    "co",
+    "plc",
+    "ltd",
+    "limited",
+    "llc",
+    "group",
+    "holdings",
+    "the",
+])
 _STOPWORDS = frozenset([
     "a",
     "an",
@@ -181,20 +208,22 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
         reader = PdfReader(io.BytesIO(value.content), strict=True)
         if reader.is_encrypted and not reader.decrypt(""):
             raise ValueError("PDF requires a non-empty password")  # noqa: TRY003, TRY301
-        pages = tuple(
-            PDFPageInput(
-                document_id=value.document_id,
-                document_sha256=digest,
-                page_number=number,
-                text=page.extract_text() or "",
+        pages = []
+        for number, page in enumerate(reader.pages, start=1):
+            text = page.extract_text() or ""
+            pages.append(
+                PDFPageInput(
+                    document_id=value.document_id,
+                    document_sha256=digest,
+                    page_number=number,
+                    text=text if text.strip() else "",
+                )
             )
-            for number, page in enumerate(reader.pages, start=1)
-        )
     except Exception as error:
         # pypdf can fail while resolving a late page, stream, font, or xref.
         # Normalize these failures at the document boundary, atomically.
         raise ValueError("unable to completely parse PDF document") from error  # noqa: TRY003
-    return pages
+    return tuple(pages)
 
 
 def pdf_page_source_id(page: PDFPageInput) -> str:
@@ -313,8 +342,83 @@ def _query_plan(question: str) -> tuple[tuple[str, ...], dict[str, float], tuple
         expanded.extend(_STATEMENT_QUERIES[kind])
     # Short searches avoid the generic Memory admission threshold rejecting a
     # page that supports only one part of a long, compound financial question.
-    searches = tuple(dict.fromkeys((question, *expanded, *words)))
+    # Keep mixed letter/digit company names searchable as single Analyzer terms.
+    names = tuple(
+        word for word in re.findall(r"[a-z0-9]+", normalized) if re.search(r"[a-z]", word) and re.search(r"\d", word)
+    )
+    searches = tuple(dict.fromkeys((question, *expanded, *words, *names)))
     return searches, weights, tuple(dict.fromkeys(phrases))
+
+
+def _document_name(hit: MemoryHit) -> str:
+    return hit.text.partition("\n")[0].strip()
+
+
+def _target_documents(documents: frozenset[str], question: str) -> frozenset[str]:
+    """Resolve explicit company/year mentions against document labels from Memory."""
+
+    query_tokens = set(_WORDS.findall(question.casefold()))
+    alphanumeric_tokens = set(re.findall(r"[a-z0-9]+", question.casefold()))
+    compact_query = "".join(re.findall(r"[a-z0-9]+", question.casefold()))
+    years = set(re.findall(r"\b(?:19|20)\d{2}\b", re.sub(r"\bfy(?=\d)", "", question.casefold())))
+    newest_year = max(years, default="")
+    scored: list[tuple[tuple[int, int], str]] = []
+    for name in documents:
+        parts = set(_WORDS.findall(name.casefold()))
+        company_parts = [
+            part
+            for part in _WORDS.findall(name.casefold())
+            if part not in _DOCUMENT_GENERIC_WORDS and not re.fullmatch(r"(?:19|20)\d{2}", part)
+        ]
+        company = "".join(company_parts)
+        full_match = bool(company) and (
+            (len(company) >= 3 and company in compact_query) or company in alphanumeric_tokens
+        )
+        overlap = len(set(company_parts) & query_tokens)
+        partial = sum(
+            len(term) >= 4 and term not in _STOPWORDS and term not in _DOCUMENT_GENERIC_WORDS and term in company
+            for term in query_tokens
+        )
+        entity_score = 6 * full_match + 3 * overlap + partial
+        if entity_score:
+            year_score = 2 if newest_year and newest_year in parts else int(bool(years & parts))
+            scored.append(((entity_score, year_score), name))
+    if not scored:
+        return frozenset()
+    best = max(score for score, _ in scored)
+    return frozenset(name for score, name in scored if score == best)
+
+
+async def _recall_documents(memory: Any, documents: frozenset[str], limit: int) -> list[MemoryHit]:
+    """Recall complete document pools through Memory's indexed public search API.
+
+    A global top-k for common financial terms can omit an entire target page.
+    Every projection includes its document label, so an exact label query can
+    retrieve that document independently of how frequently a question term occurs.
+    Grow the limit until Memory has returned the complete matching set.
+    """
+
+    hits: list[MemoryHit] = []
+    for document in sorted(documents):
+        size = max(128, limit * 4)
+        while True:
+            page = await memory.search(SearchMemoryRequest(query=document, mode="fts", limit=size))
+            if len(page.hits) < size:
+                hits.extend(hit for hit in page.hits if _document_name(hit) == document)
+                break
+            size *= 2
+    return hits
+
+
+async def _available_documents(memory: Any) -> frozenset[str]:
+    # Listing discovers current document labels; it does not manufacture hits.
+    # All candidate citations below still come from Memory.search.
+    stored = await memory.list()
+    return frozenset(
+        row.entry.text.partition("\n")[0].strip()
+        for row in stored.entries
+        if any(ref.source_type == "pdf-page" for ref in row.entry.sources)
+    )
 
 
 def _rank_pages(
@@ -326,9 +430,9 @@ def _rank_pages(
 ) -> list[MemoryHit]:
     if not hits:
         return []
-    terms = [Counter(_stem(word) for word in _WORDS.findall(hit.text.casefold())) for hit in hits]
+    terms = [Counter(_stem(word) for word in _WORDS.findall(hit.text.partition("\n")[2].casefold())) for hit in hits]
     frequency = Counter(term for counts in terms for term in counts)
-    average_length = sum(sum(counts.values()) for counts in terms) / len(terms)
+    average_length = max(1.0, sum(sum(counts.values()) for counts in terms) / len(terms))
     query_words = set(_WORDS.findall(question.casefold()))
     statement_kinds = _statement_kinds(question)
     scores = []
@@ -364,6 +468,10 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
     if type(limit) is not int or limit < 1:
         raise ValueError("limit must be a positive integer")  # noqa: TRY003
     searches, weights, phrases = _query_plan(question)
+    documents = await _available_documents(memory)
+    if not documents:
+        return ()
+    targets = _target_documents(documents, question)
     candidates: dict[tuple[str, str, str], MemoryHit] = {}
     votes: dict[tuple[str, str, str], float] = {}
     for query in searches:
@@ -372,6 +480,11 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
             identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
             candidates[identity] = hit
             votes[identity] = votes.get(identity, 0.0) + 1.0 / (60 + rank)
+    selected_documents = targets or documents
+    for hit in await _recall_documents(memory, selected_documents, limit):
+        identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
+        candidates[identity] = hit
+    candidates = {identity: hit for identity, hit in candidates.items() if _document_name(hit) in selected_documents}
     citations: list[MemoryCitation] = []
     seen: set[tuple[str, str]] = set()
     for hit in _rank_pages(list(candidates.values()), question, weights, phrases, votes):

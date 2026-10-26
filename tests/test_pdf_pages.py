@@ -53,7 +53,7 @@ from powercontext.sources.projections import TEXT_EVIDENCE_PROJECTION_KEY
 
 def _document(password: str | None = None) -> bytes:
     writer = PdfWriter()
-    for text in ("Revenue 1,234.50 and operating income 42.", "", "Cash flows 987 and depreciation 10."):
+    for text in ("Revenue 1,234.50 and operating income 42.", "   ", "Cash flows 987 and depreciation 10."):
         page = writer.add_blank_page(width=400, height=600)
         if text:
             font = DictionaryObject({
@@ -198,3 +198,57 @@ def test_compound_financial_question_preserves_main_statement_pages(tmp_path: Pa
 def test_search_limit_is_a_positive_integer(limit) -> None:
     with pytest.raises(ValueError):
         asyncio.run(search_pdf_pages(object(), "revenue", limit=limit))
+
+
+def test_target_company_pages_are_not_displaced_by_another_reports_keyword_density(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'companies.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        pages = (
+            ("ALPHA_2025_10K", "Consolidated Statement of Income\nNet sales 500. Operating profit 42."),
+            ("ALPHA_2025_10K", "Consolidated Statement of Cash Flows\nDepreciation 10. Capital expenditures 8."),
+            (
+                "BETA_2025_10K",
+                "Consolidated Statement of Income\n"
+                + "EBITDA margin, operating income, net revenue, depreciation and amortization cash flows. " * 12,
+            ),
+            (
+                "BETA_2025_10K",
+                "Consolidated Statement of Cash Flows\n"
+                + "EBITDA margin, operating income, net revenue, depreciation and amortization cash flows. " * 12,
+            ),
+            (
+                "ALPHA_2024_10K",
+                "Consolidated Statement of Cash Flows\n"
+                + "EBITDA margin, operating income, net revenue, depreciation and amortization cash flows. " * 12,
+            ),
+        )
+        expected = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="PDF", summary="Companies", idempotency_key="companies")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, (document_id, text) in enumerate(pages, start=1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id=document_id, document_sha256="a" * 64, page_number=number, text=text)
+                )
+                expected[source.name] = document_id
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+            found = await search_pdf_pages(
+                memory, "What is Alpha's 2025 EBITDA margin using operating income and depreciation?", limit=2
+            )
+            assert len(found) == 2
+            for citation in found:
+                entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                assert expected[entry.sources[0].source_id] == "ALPHA_2025_10K"
+
+    asyncio.run(run())
