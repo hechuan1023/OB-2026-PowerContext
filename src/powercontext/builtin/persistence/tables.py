@@ -686,6 +686,40 @@ TOPIC_MEMORY_ACTIVE_CHUNKS_TABLE = Table(
     CheckConstraint("end_offset > start_offset", name="ck_pc_topic_memory_active_chunks_offsets"),
 )
 
+SOURCE_LIFECYCLE_NODES_TABLE = Table(
+    "pc_source_lifecycle_nodes",
+    SHARED_METADATA,
+    Column("scope_id", identity_string(MAX_SCOPE_ID_LENGTH), primary_key=True),
+    Column("node_id", identity_string(MAX_ARTIFACT_ID_LENGTH), primary_key=True),
+    Column("kind", identity_string(16), nullable=False),
+    Column("available", Boolean, nullable=False),
+    Column("reference_payload", _entry_text_type(), nullable=False),
+    Column("artifact_id", identity_string(MAX_ARTIFACT_ID_LENGTH)),
+    Column("parents_payload", _entry_text_type(), nullable=False),
+    Column("policy", identity_string(8)),
+    Column("revision", Integer),
+    ForeignKeyConstraint(("scope_id",), ("pc_scopes.scope_id",), ondelete="CASCADE"),
+    CheckConstraint("kind IN ('source', 'memory', 'topic')", name="ck_pc_source_lifecycle_node_kind"),
+    CheckConstraint("revision IS NULL OR revision > 0", name="ck_pc_source_lifecycle_revision_positive"),
+    CheckConstraint("policy IS NULL OR policy IN ('all', 'any')", name="ck_pc_source_lifecycle_policy"),
+    Index("ix_pc_source_lifecycle_topic_state", "scope_id", "kind", "artifact_id", "available"),
+)
+
+SOURCE_LIFECYCLE_EVENTS_TABLE = Table(
+    "pc_source_lifecycle_events",
+    SHARED_METADATA,
+    Column("scope_id", identity_string(MAX_SCOPE_ID_LENGTH), primary_key=True),
+    Column("node_id", identity_string(MAX_ARTIFACT_ID_LENGTH), primary_key=True),
+    Column("sequence", Integer, primary_key=True),
+    Column("event_payload", _entry_text_type(), nullable=False),
+    ForeignKeyConstraint(
+        ("scope_id", "node_id"),
+        ("pc_source_lifecycle_nodes.scope_id", "pc_source_lifecycle_nodes.node_id"),
+        ondelete="CASCADE",
+    ),
+    CheckConstraint("sequence > 0", name="ck_pc_source_lifecycle_sequence_positive"),
+)
+
 CONNECTOR_CHECKPOINTS_TABLE = Table(
     "pc_connector_checkpoints",
     SHARED_METADATA,
@@ -1184,6 +1218,7 @@ BUILTIN_TABLES = (
     SCOPE_TABLES
     + SHARED_TABLES
     + TOPIC_MEMORY_TABLES
+    + (SOURCE_LIFECYCLE_NODES_TABLE, SOURCE_LIFECYCLE_EVENTS_TABLE)
     + MEMORY_TABLES
     + STATISTICS_TABLES
     + RECURRENCE_TABLES

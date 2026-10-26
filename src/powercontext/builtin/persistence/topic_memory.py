@@ -54,6 +54,7 @@ from powercontext.builtin.persistence.supervision import database_utc_now
 from powercontext.builtin.persistence.tables import (
     ARTIFACT_HEADS_TABLE,
     ARTIFACTS_TABLE,
+    SOURCE_LIFECYCLE_NODES_TABLE,
     TOPIC_MEMORY_ACTIVE_CHUNKS_TABLE,
     TOPIC_MEMORY_ACTIVE_TOPICS_TABLE,
     TOPIC_MEMORY_RETRIEVAL_SHAPE_TABLE,
@@ -487,6 +488,7 @@ class TopicMemoryRepository:
             admission=admission,
         )
         channels = await self.index.search(connection, scope_id, request)
+        channels = await self._exclude_withdrawn_topics(connection, scope_id, channels)
         await self._check_retrieval_shape(connection)
         outcome = _fuse_topic_memory_rankings(query, channels, limit, mode=used_mode, admission=admission)
         return TopicMemorySearchResult(
@@ -499,6 +501,33 @@ class TopicMemoryRepository:
                 admitted=outcome.admitted,
                 rejected=outcome.rejected,
             ),
+        )
+
+    @staticmethod
+    async def _exclude_withdrawn_topics(connection: AsyncConnection, scope_id: str, channels):
+        rows = (
+            await connection.execute(
+                select(
+                    SOURCE_LIFECYCLE_NODES_TABLE.c.artifact_id,
+                    SOURCE_LIFECYCLE_NODES_TABLE.c.available,
+                ).where(
+                    SOURCE_LIFECYCLE_NODES_TABLE.c.scope_id == scope_id,
+                    SOURCE_LIFECYCLE_NODES_TABLE.c.kind == "topic",
+                )
+            )
+        ).mappings()
+        states: dict[str, list[bool]] = {}
+        for row in rows:
+            if row["artifact_id"] is not None:
+                states.setdefault(str(row["artifact_id"]), []).append(bool(row["available"]))
+        hidden = {artifact_id for artifact_id, values in states.items() if not any(values)}
+        if not hidden:
+            return channels
+        return channels.model_copy(
+            update={
+                field: tuple(hit for hit in getattr(channels, field) if hit.artifact_ref.artifact_id not in hidden)
+                for field in ("topic_fts", "topic_vector", "detail_fts", "detail_vector")
+            }
         )
 
     async def _activate(
