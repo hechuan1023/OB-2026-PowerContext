@@ -97,22 +97,21 @@ WHERE m.scope_id = :scope_id
 ORDER BY l2_distance(m.embedding, :query_vector) APPROXIMATE
 LIMIT :candidate_limit
 """
+# Keep each branch's joins equivalent to its standalone search. Extra head joins
+# can change the native approximate-vector plan and drop candidates. Validated
+# request heads supply current citations in memory_channel_hits.
 _OCEANBASE_HYBRID_SEARCH_SQL = """
 WITH fts_candidates AS (
     SELECT
         'fts' AS channel,
         f.memory_artifact_id,
-        ah.revision AS head_revision,
+        f.head_revision,
         f.entry_id,
         f.entry_version_id,
         v.text,
         MATCH(f.searchable_text) AGAINST (:analyzed_query) AS fts_score,
         CAST(NULL AS DOUBLE) AS distance
     FROM pc_memory_entry_heads AS f
-    JOIN pc_artifact_heads AS ah
-      ON ah.scope_id = f.scope_id
-     AND ah.family = 'memory'
-     AND ah.artifact_id = f.memory_artifact_id
     JOIN pc_memory_entry_versions AS v
       ON v.scope_id = f.scope_id
      AND v.memory_artifact_id = f.memory_artifact_id
@@ -128,26 +127,17 @@ vector_candidates AS (
     SELECT
         'vector' AS channel,
         m.memory_artifact_id,
-        ah.revision AS head_revision,
-        h.entry_id,
-        h.entry_version_id,
+        m.head_revision,
+        m.entry_id,
+        m.entry_version_id,
         v.text,
         CAST(NULL AS DOUBLE) AS fts_score,
         l2_distance(m.embedding, :query_vector) AS distance
     FROM pc_memory_vector_entries AS m
-    JOIN pc_memory_entry_heads AS h
-      ON h.scope_id = m.scope_id
-     AND h.memory_artifact_id = m.memory_artifact_id
-     AND h.entry_id = m.entry_id
-     AND h.entry_version_id = m.entry_version_id
-    JOIN pc_artifact_heads AS ah
-      ON ah.scope_id = m.scope_id
-     AND ah.family = 'memory'
-     AND ah.artifact_id = m.memory_artifact_id
     JOIN pc_memory_entry_versions AS v
-      ON v.scope_id = h.scope_id
-     AND v.memory_artifact_id = h.memory_artifact_id
-     AND v.entry_version_id = h.entry_version_id
+      ON v.scope_id = m.scope_id
+     AND v.memory_artifact_id = m.memory_artifact_id
+     AND v.entry_version_id = m.entry_version_id
     WHERE m.scope_id = :scope_id
       AND m.memory_artifact_id IN :memory_artifact_ids
       {vector_tag_filter}
