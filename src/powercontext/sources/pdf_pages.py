@@ -19,12 +19,14 @@ from __future__ import annotations
 import io
 import math
 import re
+import zlib
 from collections import Counter
 from hashlib import sha256
 from typing import Any
 
 from pydantic import BaseModel, Field, StrictBytes, StrictInt, StrictStr, field_validator
-from pypdf import PdfReader
+from pypdf import PdfReader, get_configuration
+from pypdf.generic import ArrayObject, DictionaryObject, EncodedStreamObject, IndirectObject, NameObject, StreamObject
 
 from powercontext.builtin.artifacts.memory.models import MemoryCitation, MemoryHit
 from powercontext.builtin.runtime.models import GetMemoryEntryRequest, SearchMemoryRequest
@@ -198,6 +200,66 @@ class PDFPageInput(BaseModel):
     _validate_document_id = field_validator("document_id")(_document_id)
 
 
+def _validate_flate_data(data: bytes) -> None:
+    decoder = zlib.decompressobj()
+    maximum = get_configuration().zlib_maximum_output_length
+    total = 0
+    while data:
+        block = decoder.decompress(data, 64 * 1024)
+        total += len(block)
+        if maximum and total > maximum:
+            raise ValueError("PDF stream exceeds decompression limit")  # noqa: TRY003
+        data = decoder.unconsumed_tail
+    if not decoder.eof:
+        raise ValueError("incomplete compressed PDF stream")  # noqa: TRY003
+
+
+def _validate_flate_stream(stream: StreamObject) -> None:
+    """Reject compressed data that pypdf would recover as partial or empty text."""
+
+    filters = stream.get("/Filter", ())
+    if isinstance(filters, IndirectObject):
+        filters = filters.get_object()
+    if not isinstance(filters, (tuple, ArrayObject)):
+        filters = (filters,)
+    for index, name in enumerate(filters):
+        if name not in ("/FlateDecode", "/Fl"):
+            continue
+        # pypdf exposes decoded bytes through get_data(); retain the encoded
+        # bytes here so its forgiving Flate recovery cannot hide corruption.
+        data = stream._data
+        if index:
+            prefix = EncodedStreamObject()
+            prefix._data = data
+            prefix[NameObject("/Filter")] = ArrayObject(filters[:index])
+            parameters = stream.get("/DecodeParms")
+            if isinstance(parameters, IndirectObject):
+                parameters = parameters.get_object()
+            if parameters is not None:
+                prefix[NameObject("/DecodeParms")] = (
+                    ArrayObject(parameters[:index]) if isinstance(parameters, ArrayObject) else parameters
+                )
+            data = prefix.get_data()
+        _validate_flate_data(data)
+
+
+def _validate_pdf_streams(reader: PdfReader) -> None:
+    # Walk indirect objects once, including form XObjects and font mappings:
+    # corruption in a resource must not silently remove text from a later page.
+    pending: list[Any] = [reader.trailer]
+    seen: set[int] = set()
+    while pending:
+        value = pending.pop()
+        if isinstance(value, IndirectObject):
+            value = value.get_object()
+        if not isinstance(value, (DictionaryObject, ArrayObject)) or id(value) in seen:
+            continue
+        seen.add(id(value))
+        if isinstance(value, StreamObject):
+            _validate_flate_stream(value)
+        pending.extend(value.values() if isinstance(value, DictionaryObject) else value)
+
+
 def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
     """Extract every page, returning nothing until the complete input succeeds."""
 
@@ -208,6 +270,7 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
         reader = PdfReader(io.BytesIO(value.content), strict=True)
         if reader.is_encrypted and not reader.decrypt(""):
             raise ValueError("PDF requires a non-empty password")  # noqa: TRY003, TRY301
+        _validate_pdf_streams(reader)
         pages = []
         for number, page in enumerate(reader.pages, start=1):
             text = page.extract_text() or ""

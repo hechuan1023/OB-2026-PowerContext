@@ -15,13 +15,15 @@
 """Boundary checks for complete, revision-specific PDF evidence."""
 
 import asyncio
+import base64
 import io
+import zlib
 from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from pypdf import PdfWriter
-from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import ArrayObject, DecodedStreamObject, DictionaryObject, EncodedStreamObject, NameObject
 
 from powercontext.builtin.artifacts.memory import MemoryEntryInput
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
@@ -111,6 +113,49 @@ def test_identity_includes_document_revision_and_page_with_bounded_unicode_names
 def test_password_required_document_is_rejected() -> None:
     with pytest.raises(ValueError):
         parse_pdf_document(PDFDocumentInput(document_id="encrypted", content=_document("secret")))
+
+
+def test_empty_password_document_with_compressed_text_is_readable() -> None:
+    pages = parse_pdf_document(PDFDocumentInput(document_id="permissions", content=_document("")))
+    assert [page.text.strip() for page in pages] == [
+        "Revenue 1,234.50 and operating income 42.",
+        "",
+        "Cash flows 987 and depreciation 10.",
+    ]
+
+
+@pytest.mark.parametrize("chained", [False, True])
+@pytest.mark.parametrize("data", [b"not a zlib stream", zlib.compress(b"BT (partial text) Tj ET")[:-4], b""])
+def test_corrupt_late_compressed_page_fails_atomically(data: bytes, *, chained: bool) -> None:
+    writer = PdfWriter(clone_from=PdfReader(io.BytesIO(_document())))
+    stream = EncodedStreamObject()
+    stream._data = base64.a85encode(data) + b"~>" if chained else data
+    stream[NameObject("/Filter")] = (
+        ArrayObject([NameObject("/ASCII85Decode"), NameObject("/FlateDecode")])
+        if chained
+        else NameObject("/FlateDecode")
+    )
+    writer.pages[-1][NameObject("/Contents")] = writer._add_object(stream)
+    output = io.BytesIO()
+    writer.write(output)
+    with pytest.raises(ValueError, match="unable to completely parse"):
+        parse_pdf_document(PDFDocumentInput(document_id="damaged-late-page", content=output.getvalue()))
+
+
+@pytest.mark.parametrize(
+    "content", [pytest.param(b"", id="empty"), pytest.param(b" \n" * 70_000, id="large-whitespace")]
+)
+def test_valid_compressed_empty_page_remains_a_blank_page(content: bytes) -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=100, height=200)
+    stream = EncodedStreamObject()
+    stream._data = zlib.compress(content)
+    stream[NameObject("/Filter")] = NameObject("/FlateDecode")
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="compressed-blank", content=output.getvalue()))
+    assert [(page.page_number, page.text) for page in pages] == [(1, "")]
 
 
 @pytest.mark.parametrize("document_id", ["", "  ", "\t\n", "　"])
