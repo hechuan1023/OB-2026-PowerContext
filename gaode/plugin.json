@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.json",
+  "name": "amap-maps",
+  "version": "0.1.0",
+  "description": "AMap (Gaode) nearby-place discovery Skill with real walking-route filtering.",
+  "author": {
+    "name": "PowerContext Team",
+    "email": "open_oceanbase@oceanbase.com",
+    "url": "https://github.com/oceanbase"
+  },
+  "homepage": "https://github.com/oceanbase/powercontext",
+  "repository": "https://github.com/oceanbase/powercontext",
+  "license": "Apache-2.0",
+  "keywords": [
+    "agent-plugin",
+    "amap",
+    "gaode",
+    "nearby",
+    "walking",
+    "poi",
+    "mcp"
+  ]
+}
