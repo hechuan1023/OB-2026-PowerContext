@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LitMemo · 记得你研究方向的文献检索助手</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">LM</span>
+      <div>
+        <h1>LitMemo</h1>
+        <p>seekdb 混合检索 × PowerContext 研究记忆</p>
+      </div>
+    </div>
+    <div class="health" id="health"></div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="search">检索</button>
+    <button class="tab" data-tab="library">文献库</button>
+    <button class="tab" data-tab="memory">研究记忆</button>
+  </nav>
+
+  <main>
+    <section id="tab-search" class="tab-panel active">
+      <div class="search-layout">
+        <aside class="side">
+          <div class="card" id="resume-card" hidden>
+            <h3>继续上次的研究</h3>
+            <p id="resume-text" class="muted"></p>
+            <button id="resume-btn" class="ghost">恢复上次检索条件</button>
+          </div>
+
+          <form class="card" id="search-form">
+            <h3>检索文献与笔记</h3>
+            <label>问题或关键词
+              <textarea id="query" rows="3" placeholder="例如：扩散模型如何减少采样步数？">扩散模型如何减少采样步数</textarea>
+            </label>
+            <div class="row">
+              <label>模式
+                <select id="mode">
+                  <option value="hybrid">混合（向量+全文）</option>
+                  <option value="vector">语义向量</option>
+                  <option value="fulltext">全文关键词</option>
+                </select>
+              </label>
+              <label>条数
+                <input id="limit" type="number" min="1" max="20" value="6" />
+              </label>
+            </div>
+            <div class="row">
+              <label>年份从
+                <input id="year_from" type="number" placeholder="不限" />
+              </label>
+              <label>到
+                <input id="year_to" type="number" placeholder="不限" />
+              </label>
+              <label>类型
+                <select id="kind">
+                  <option value="">全部</option>
+                  <option value="paper">论文</option>
+                  <option value="note">笔记</option>
+                </select>
+              </label>
+            </div>
+            <label class="checkbox"><input id="use_memory" type="checkbox" checked /> 应用我的研究设定（PowerContext 记忆）</label>
+            <button type="submit" class="primary">检索</button>
+          </form>
+
+          <form class="card" id="constraints-form">
+            <h3>研究设定 <span class="tag">存入 PowerContext</span></h3>
+            <label>研究方向
+              <input id="c_topic" placeholder="例如：扩散模型高效采样" />
+            </label>
+            <label>只看该年份之后
+              <input id="c_year_from" type="number" placeholder="例如 2022" />
+            </label>
+            <label>排除关键词（逗号分隔）
+              <input id="c_exclude" placeholder="例如：综述, 纯理论" />
+            </label>
+            <label>默认返回条数
+              <input id="c_limit" type="number" min="1" max="20" value="6" />
+            </label>
+            <button type="submit" class="ghost">保存研究设定</button>
+            <p class="muted small">保存后每次检索自动带上这些约束，换台设备、换个会话也能召回。</p>
+          </form>
+        </aside>
+
+        <div class="results">
+          <div id="memory-banner"></div>
+          <div id="results"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-library" class="tab-panel">
+      <div class="card">
+        <h3>导入文献 / 笔记</h3>
+        <p class="muted">支持 Markdown、TXT、PDF。Markdown 可在文件头用 <code>--- title/year/kind/tags ---</code> 声明元数据。</p>
+        <form id="upload-form" class="upload">
+          <input id="files" type="file" multiple accept=".md,.markdown,.txt,.pdf" />
+          <div class="row">
+            <label>年份 <input id="u_year" type="number" placeholder="可选" /></label>
+            <label>类型
+              <select id="u_kind">
+                <option value="">自动</option>
+                <option value="paper">论文</option>
+                <option value="note">笔记</option>
+              </select>
+            </label>
+            <label>标签 <input id="u_tags" placeholder="可选，逗号分隔" /></label>
+          </div>
+          <button type="submit" class="primary">上传并入库</button>
+          <button type="button" id="samples-btn" class="ghost">一键导入内置示例文献</button>
+        </form>
+        <div id="import-log" class="muted small"></div>
+      </div>
+      <div class="card">
+        <h3>已入库 <span id="doc-count" class="tag"></span></h3>
+        <div id="documents"></div>
+      </div>
+    </section>
+
+    <section id="tab-memory" class="tab-panel">
+      <div class="card">
+        <h3>记一笔研究笔记</h3>
+        <form id="note-form" class="row">
+          <input id="note-text" placeholder="例如：DPM-Solver 在 20 步内质量已够用，优先复现它" />
+          <button type="submit" class="primary">保存到 PowerContext</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>PowerContext 中的记忆 <span id="memory-scope" class="tag"></span></h3>
+        <p class="muted small">这些条目保存在 PowerContext Server，不在本应用的文件里。检索时会读取研究设定与相关记忆，遗忘后立即不再参与召回。</p>
+        <div id="memories"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
