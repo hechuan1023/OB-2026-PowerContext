@@ -148,6 +148,24 @@ def _visible_blocks(value: JsonValue, *, tool_calls: bool = True) -> str:
     return "\n".join(text)
 
 
+def _message_evidence(message: dict[str, JsonValue]) -> tuple[str, str] | None:
+    role = _required_string(message.get("role"), "message role")
+    if role == "system":
+        return None
+    if role == "bashExecution":
+        command, output = message.get("command", ""), message.get("output", "")
+        if not isinstance(command, str) or not isinstance(output, str):
+            raise ValueError("Pi bash command and output must be strings")  # noqa: TRY003
+        body = f"$ {command}\n{output}"
+    else:
+        body = _visible_blocks(message.get("content"))
+        if role == "toolResult":
+            name = _required_string(message.get("toolName"), "tool result name")
+            call_id = _required_string(message.get("toolCallId"), "tool result call id")
+            body = f"[tool_result {name} {call_id}] {body}"
+    return role, body
+
+
 def _visible_event(archive: _Archive, event_id: str) -> PiEventInput | None:
     record = archive.records[event_id]
     event_type = str(record["type"])
@@ -155,18 +173,10 @@ def _visible_event(archive: _Archive, event_id: str) -> PiEventInput | None:
         message = record.get("message")
         if not isinstance(message, dict):
             raise ValueError("Pi message nodes require a message object")  # noqa: TRY003
-        role = _required_string(message.get("role"), "message role")
-        if role == "bashExecution":
-            command, output = message.get("command", ""), message.get("output", "")
-            if not isinstance(command, str) or not isinstance(output, str):
-                raise ValueError("Pi bash command and output must be strings")  # noqa: TRY003
-            body = f"$ {command}\n{output}" if command or output else ""
-        else:
-            body = _visible_blocks(message.get("content"))
-            if role == "toolResult" and body.strip():
-                name = _required_string(message.get("toolName"), "tool result name")
-                call_id = _required_string(message.get("toolCallId"), "tool result call id")
-                body = f"[tool_result {name} {call_id}] {body}"
+        evidence = _message_evidence(message)
+        if evidence is None:
+            return None
+        role, body = evidence
     elif event_type in {"compaction", "branch_summary"}:
         role = event_type
         summary = record.get("summary", "")
@@ -193,7 +203,10 @@ def _visible_event(archive: _Archive, event_id: str) -> PiEventInput | None:
 
 
 def _events(archive: _Archive) -> tuple[PiEventInput, ...]:
-    events = (_visible_event(archive, event_id) for event_id in archive.chain)
+    # Validate every record before choosing a branch or accepting any submission.
+    # An invalid payload on another branch must not allow progress to be committed.
+    by_id = {event_id: _visible_event(archive, event_id) for event_id in archive.records}
+    events = (by_id[event_id] for event_id in archive.chain)
     return tuple(event for event in events if event is not None)
 
 
@@ -305,10 +318,11 @@ class PiSessionConnector:
             outcome = await session.submit(pi_event_source_id(event.session_id, event.event_id), "pi-event", event)
             if outcome.status is not ConnectorSubmissionStatus.ACCEPTED:
                 return ConnectorRunCompletion(status=ConnectorRunStatus.INCOMPLETE, checkpoint=session.checkpoint)
-        # Include control ancestors so that a rewrite cannot silently move saved
-        # evidence onto a different branch. The input checkpoint is never mutated.
+        # Only captured events are immutable progress. Control and invisible
+        # records have not produced a Source and must not be marked as imported.
+        # The input checkpoint is never mutated.
         checkpoint.sessions[archive.session_id] = previous | {
-            event_id: checksums[event_id] for event_id in archive.chain
+            event.event_id: checksums[event.event_id] for event in events
         }
         return ConnectorRunCompletion(status=ConnectorRunStatus.COMPLETE, checkpoint=checkpoint.model_dump(mode="json"))
 

@@ -118,6 +118,35 @@ def test_session_version_is_an_integer_three(version) -> None:
         parse_pi_session(PiSessionInput(content=raw))
 
 
+def test_empty_tool_results_are_preserved_and_system_prompts_do_not_become_evidence() -> None:
+    records = [
+        {
+            "type": "message",
+            "id": "system",
+            "parentId": None,
+            "message": {"role": "system", "content": "Internal prompt"},
+        },
+        _message("request", "system", "Create an empty file"),
+        {
+            "type": "message",
+            "id": "result",
+            "parentId": "request",
+            "message": {"role": "toolResult", "toolName": "write", "toolCallId": "call", "content": []},
+        },
+    ]
+    events = parse_pi_session(PiSessionInput(content=_archive(records)))
+    assert [event.event_id for event in events] == ["request", "result"]
+    assert events[0].parent_id == "system"
+    assert events[1].content == "toolResult: [tool_result write call] "
+    assert events[1].record == records[2]
+
+
+def test_invalid_payload_on_an_unselected_branch_fails_the_complete_parse() -> None:
+    records = [_message("root", None, "Request"), _message("bad", "root", 42)]
+    with pytest.raises(ValueError):
+        parse_pi_session(PiSessionInput(content=_archive(records), leaf_id="root"))
+
+
 class _Sink:
     def __init__(self):
         self.events: dict[str, PiEventInput] = {}
@@ -185,5 +214,42 @@ def test_partial_sink_failure_and_off_branch_rewrite_preserve_committed_progress
         assert len(sink.events) == 4
         replay = await ingest("tail")
         assert replay.items == ()
+
+    asyncio.run(run())
+
+
+def test_previously_invisible_record_can_become_visible_until_it_is_captured(tmp_path: Path) -> None:
+    async def run() -> None:
+        path = tmp_path / "streamed.jsonl"
+        records = [
+            _message("root", None, "Request"),
+            {
+                "type": "message",
+                "id": "answer",
+                "parentId": "root",
+                "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "private"}]},
+            },
+        ]
+        binding = ConnectorBinding(
+            scope_id="scope", binding_id="stream", connector_name="pi-session-history", connector_version="1"
+        )
+        sink, progress = _Sink(), _Progress()
+
+        async def ingest():
+            return await ConnectorLifecycle(sink=sink, checkpoints=progress).run(PiSessionConnector(path), binding)
+
+        path.write_bytes(_archive(records))
+        await ingest()
+        assert len(sink.events) == 1
+        records[1]["message"]["content"] = [{"type": "text", "text": "Visible answer"}]
+        path.write_bytes(_archive(records))
+        result = await ingest()
+        assert len(result.items) == 1 and len(sink.events) == 2
+        committed = copy.deepcopy(progress.checkpoint)
+        records[1]["message"]["content"] = "Changed after capture"
+        path.write_bytes(_archive(records))
+        with pytest.raises(ValueError):
+            await ingest()
+        assert progress.checkpoint == committed
 
     asyncio.run(run())
