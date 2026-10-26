@@ -97,6 +97,67 @@ WHERE m.scope_id = :scope_id
 ORDER BY l2_distance(m.embedding, :query_vector) APPROXIMATE
 LIMIT :candidate_limit
 """
+_OCEANBASE_HYBRID_SEARCH_SQL = """
+WITH fts_candidates AS (
+    SELECT
+        'fts' AS channel,
+        f.memory_artifact_id,
+        ah.revision AS head_revision,
+        f.entry_id,
+        f.entry_version_id,
+        v.text,
+        MATCH(f.searchable_text) AGAINST (:analyzed_query) AS fts_score,
+        CAST(NULL AS DOUBLE) AS distance
+    FROM pc_memory_entry_heads AS f
+    JOIN pc_artifact_heads AS ah
+      ON ah.scope_id = f.scope_id
+     AND ah.family = 'memory'
+     AND ah.artifact_id = f.memory_artifact_id
+    JOIN pc_memory_entry_versions AS v
+      ON v.scope_id = f.scope_id
+     AND v.memory_artifact_id = f.memory_artifact_id
+     AND v.entry_version_id = f.entry_version_id
+    WHERE f.scope_id = :scope_id
+      AND f.memory_artifact_id IN :memory_artifact_ids
+      AND MATCH(f.searchable_text) AGAINST (:analyzed_query)
+      {fts_tag_filter}
+    ORDER BY fts_score DESC, f.memory_artifact_id, f.entry_id, f.entry_version_id
+    LIMIT :candidate_limit
+),
+vector_candidates AS (
+    SELECT
+        'vector' AS channel,
+        m.memory_artifact_id,
+        ah.revision AS head_revision,
+        h.entry_id,
+        h.entry_version_id,
+        v.text,
+        CAST(NULL AS DOUBLE) AS fts_score,
+        l2_distance(m.embedding, :query_vector) AS distance
+    FROM pc_memory_vector_entries AS m
+    JOIN pc_memory_entry_heads AS h
+      ON h.scope_id = m.scope_id
+     AND h.memory_artifact_id = m.memory_artifact_id
+     AND h.entry_id = m.entry_id
+     AND h.entry_version_id = m.entry_version_id
+    JOIN pc_artifact_heads AS ah
+      ON ah.scope_id = m.scope_id
+     AND ah.family = 'memory'
+     AND ah.artifact_id = m.memory_artifact_id
+    JOIN pc_memory_entry_versions AS v
+      ON v.scope_id = h.scope_id
+     AND v.memory_artifact_id = h.memory_artifact_id
+     AND v.entry_version_id = h.entry_version_id
+    WHERE m.scope_id = :scope_id
+      AND m.memory_artifact_id IN :memory_artifact_ids
+      {vector_tag_filter}
+    ORDER BY l2_distance(m.embedding, :query_vector) APPROXIMATE
+    LIMIT :candidate_limit
+)
+SELECT * FROM fts_candidates
+UNION ALL
+SELECT * FROM vector_candidates
+"""
 
 
 class OceanBaseMemoryFTSIndex:
@@ -285,6 +346,23 @@ class OceanBaseMemoryVectorIndex:
             bindparam("tag_hashes", expanding=True),
             bindparam("query_vector", type_=VECTOR(profile.dimension)),
         )
+        self._tagged_hybrid_search_sql = text(
+            _OCEANBASE_HYBRID_SEARCH_SQL.format(
+                fts_tag_filter=memory_tag_sql("f"),
+                vector_tag_filter=memory_tag_sql("m"),
+            )
+        ).bindparams(
+            bindparam("memory_artifact_ids", expanding=True),
+            bindparam("tag_keys", expanding=True),
+            bindparam("tag_hashes", expanding=True),
+            bindparam("query_vector", type_=VECTOR(profile.dimension)),
+        )
+        self._hybrid_search_sql = text(
+            _OCEANBASE_HYBRID_SEARCH_SQL.format(fts_tag_filter="", vector_tag_filter="")
+        ).bindparams(
+            bindparam("memory_artifact_ids", expanding=True),
+            bindparam("query_vector", type_=VECTOR(profile.dimension)),
+        )
 
     async def initialize(self, connection: AsyncConnection, /) -> None:
         if connection.dialect.name != "mysql":
@@ -393,6 +471,67 @@ class OceanBaseMemoryVectorIndex:
             )
         ).mappings()
         return MemorySearchChannels(vector=memory_channel_hits(rows, request.memories))
+
+    async def search_hybrid(
+        self,
+        connection: AsyncConnection,
+        scope_id: str,
+        request: MemorySearchRequest,
+        /,
+    ) -> MemorySearchChannels:
+        """Read FTS and vector candidates with one server-side hybrid statement."""
+
+        if request.mode != "hybrid":
+            return MemorySearchChannels()
+        if request.embedding_profile != self.profile or request.query_vector is None:
+            raise CapabilityNotSupportedError("embedding-profile")
+        if not await self.vector_complete(connection, scope_id, request.memories, self.profile):
+            raise CapabilityNotSupportedError("vector")
+        query = self._hybrid_search_sql if request.tag_filter is None else self._tagged_hybrid_search_sql
+        rows = (
+            await connection.execute(
+                query,
+                {
+                    "scope_id": scope_id,
+                    "memory_artifact_ids": tuple(memory.artifact_id for memory in request.memories),
+                    "analyzed_query": request.analyzed_query,
+                    "query_vector": validate_embedding(
+                        request.query_vector,
+                        dimension=self.profile.dimension,
+                    ),
+                    "candidate_limit": request.candidate_limit,
+                    **memory_tag_parameters(request.tag_filter),
+                },
+            )
+        ).mappings()
+        fts_rows: list[dict[str, object]] = []
+        vector_rows: list[dict[str, object]] = []
+        for row in rows:
+            value = dict(row)
+            if value["channel"] == "fts":
+                fts_rows.append(value)
+            else:
+                vector_rows.append(value)
+        fts_rows.sort(
+            key=lambda row: (
+                -float(row["fts_score"]),
+                str(row["memory_artifact_id"]),
+                str(row["entry_id"]),
+                str(row["entry_version_id"]),
+            )
+        )
+        vector_rows.sort(
+            key=lambda row: (
+                float(row["distance"]),
+                str(row["memory_artifact_id"]),
+                str(row["entry_id"]),
+                str(row["entry_version_id"]),
+            )
+        )
+        return MemorySearchChannels(
+            fts=memory_channel_hits(fts_rows, request.memories),
+            vector=memory_channel_hits(vector_rows, request.memories),
+        )
 
     async def vector_complete(
         self,

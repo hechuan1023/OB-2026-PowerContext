@@ -247,6 +247,14 @@ class CompositeMemoryIndex:
         request: MemorySearchRequest,
         /,
     ) -> MemorySearchChannels:
+        if request.mode == "hybrid":
+            # Some backends can retrieve both candidate channels in one native
+            # statement. Keep the fallback below for independent index engines.
+            for index in self.indexes:
+                hybrid_search = getattr(index, "search_hybrid", None)
+                if hybrid_search is not None:
+                    return await hybrid_search(connection, scope_id, request)
+
         fts: tuple[MemoryChannelHit, ...] = ()
         vector: tuple[MemoryChannelHit, ...] = ()
         for index in self.indexes:
