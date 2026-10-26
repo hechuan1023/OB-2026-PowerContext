@@ -7,7 +7,8 @@
 - 开发日期：2026-10-26。
 - 基线：`oceanbase/powercontext` 的 `2026-competition-ecosystem` 分支，初始提交 `d647275c`。
 - 项目资产位置：`qoder/litmemo/`。
-- Qoder UID：`请参赛者在提交前填写`。
+- Qoder UID：`019f7ab2-833b-7e0b-a144-905ddc58b3b5`。
+- 公开展示网站：<https://litmemo-research-vkx9bbhzdzt.qoder.zone>。
 
 本文件记录本次真实开发过程，不把后续整理的文字冒充对话原文。提交时可另外附 Qoder 对话截图或录屏。
 
@@ -85,7 +86,10 @@ uv run python scripts/verify.py
 - [文献库](screenshots/02-library.png)
 - [研究记忆](screenshots/03-memory.png)
 
-## 提交前需补充的人工材料
+## 提测信息
 
-- 将上方的 Qoder UID 占位内容替换为参赛者真实 UID。
-- 如平台要求图像或视频形式的开发证明，补充本次 Qoder 对话截图或录屏；不要伪造不存在的操作记录。
+- 报名仓库：`https://github.com/hechuan1023/OB-2026-PowerContext.git`
+- 提测分支：`2026-competition-ecosystem`
+- 项目目录：`qoder/litmemo/`
+- 展示网站：<https://litmemo-research-vkx9bbhzdzt.qoder.zone>
+- 如平台要求图像或视频形式的开发证明，可补充本次 Qoder 对话截图或录屏。
