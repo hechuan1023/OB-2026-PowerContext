@@ -16,14 +16,14 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from powercontext.builtin.persistence.cursors import SourceCursorRepository
 from powercontext.builtin.persistence.database import AsyncDatabase
 from powercontext.builtin.persistence.processing_intents import ArtifactProcessingIntentRepository
 from powercontext.builtin.persistence.supervision import ArtifactProcessingFence, ArtifactProcessingLeaseRepository
-from powercontext.builtin.persistence.tables import PROFILE_POLICIES_TABLE, SOURCE_JOURNAL_HEADS_TABLE
+from powercontext.builtin.persistence.tables import PROFILE_POLICIES_TABLE, SOURCE_JOURNAL_HEADS_TABLE, SOURCES_TABLE
 
 
 async def enabled_profile_scopes(connection: AsyncConnection, scope_ids: tuple[str, ...]) -> frozenset[str]:
@@ -48,10 +48,46 @@ async def enabled_profile_scopes(connection: AsyncConnection, scope_ids: tuple[s
 class SourceProcessingPendingProvider:
     """Inspect journal metadata, never Source bodies, prompts, or models."""
 
-    def __init__(self, database: AsyncDatabase, binding_name: str, artifact_family: str) -> None:
+    def __init__(
+        self,
+        database: AsyncDatabase,
+        binding_name: str,
+        artifact_family: str,
+        *,
+        source_count_threshold: int | None = None,
+    ) -> None:
+        if source_count_threshold is not None and (
+            type(source_count_threshold) is not int or source_count_threshold < 1
+        ):
+            raise ValueError("source count threshold must be a positive integer")  # noqa: TRY003
         self._database = database
         self._binding = binding_name
         self._family = artifact_family
+        self._source_count_threshold = source_count_threshold
+
+    async def count_ready(self, connection: AsyncConnection, scope_ids: tuple[str, ...]) -> frozenset[str]:
+        """Count durable journal identities after this Family's successful cursors."""
+
+        if not scope_ids or self._source_count_threshold is None:
+            return frozenset()
+        cursors = await SourceCursorRepository().load_many(connection, scope_ids, self._binding)
+        sources = SOURCES_TABLE
+        pending = or_(
+            *(
+                and_(
+                    sources.c.scope_id == scope,
+                    sources.c.journal_position > (cursors[scope].cursor.sequence if scope in cursors else 0),
+                )
+                for scope in scope_ids
+            )
+        )
+        rows = await connection.scalars(
+            select(sources.c.scope_id)
+            .where(pending)
+            .group_by(sources.c.scope_id)
+            .having(func.count() >= self._source_count_threshold)
+        )
+        return frozenset(rows)
 
     async def reconcile(self, after_scope_id: str | None, limit: int, *, fence: ArtifactProcessingFence) -> str | None:
         heads = SOURCE_JOURNAL_HEADS_TABLE
