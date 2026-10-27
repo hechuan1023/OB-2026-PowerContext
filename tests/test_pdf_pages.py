@@ -209,7 +209,8 @@ def test_actual_text_recovers_missing_glyphs_without_guessing(named: bool, form:
     pages = parse_pdf_document(value)
     assert "operations 1234.50 offerings" in pages[0].text
     # An unannotated missing glyph is not replaced by a guessed letter.
-    assert pages[0].text.count("\0") == 1
+    assert "\0" not in pages[0].text
+    assert pages[0].text.count("\ufffd") == 1
     assert pages[-1].text == ""
     assert {page.document_sha256 for page in pages} == {sha256(content).hexdigest()}
     assert parse_pdf_document(value) == pages
@@ -221,8 +222,9 @@ def test_conflicting_actual_text_on_later_pages_does_not_change_shared_font() ->
     )
     assert len(pages) == 3
     for page in pages[:2]:
-        assert "opera\0ons" in page.text
-        assert page.text.count("\0") == 2
+        assert "opera\ufffdons" in page.text
+        assert "\0" not in page.text
+        assert page.text.count("\ufffd") == 2
 
 
 def test_actual_text_does_not_overwrite_existing_valid_unicode_mapping() -> None:
@@ -579,6 +581,7 @@ def test_financial_ratios_recall_operands_without_metric_names_on_the_pages(tmp_
             "Purchases of property and equipment 50. Financing activities: Cash dividends paid 20.",
             *(
                 f"Operating review {number}\nWe monitor asset turnover, working capital, return on assets, "
+                "return on average assets, return on average equity, "
                 "days of sales outstanding, debt to equity ratios, net debt and dividend payments. "
                 "These financial metrics guide management decisions and business planning."
                 for number in range(25)
@@ -609,6 +612,8 @@ def test_financial_ratios_recall_operands_without_metric_names_on_the_pages(tmp_
             for metric, expected in (
                 ("asset turnover", {1, 2}),
                 ("return on assets", {1, 2}),
+                ("return on average assets", {1, 2}),
+                ("return on average equity", {1, 2}),
                 ("days of sales outstanding", {1, 2}),
                 ("net working capital", {2}),
                 ("dividend payments", {3}),

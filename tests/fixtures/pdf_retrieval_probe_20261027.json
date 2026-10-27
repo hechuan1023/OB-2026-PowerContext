@@ -1,0 +1,389 @@
+{
+  "baseline_commit": "717ee05b22b090107b37937670b6424d59632932",
+  "cases": [
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "document": "APPLE_2022_10K",
+      "expected": [
+        32
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "metric",
+      "question": "What was Apple's operating margin in fiscal 2022?",
+      "split": "development"
+    },
+    {
+      "document": "APPLE_2022_10K",
+      "expected": [
+        34
+      ],
+      "first_run_ranks": [
+        4
+      ],
+      "kind": "metric",
+      "question": "How much would Apple have left after paying its short-term obligations from its current assets at the 2022 year end?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "document": "APPLE_2022_10K",
+      "expected": [
+        46
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "notes",
+      "question": "How much of Apple's uncertain tax benefits could affect its effective tax rate if recognized in 2022?",
+      "split": "development"
+    },
+    {
+      "document": "APPLE_2022_10K",
+      "expected": [
+        50
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "notes",
+      "question": "How is the price employees pay to buy Apple shares through payroll deductions determined?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "document": "BOEING_2022_10K",
+      "expected": [
+        59
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "metric",
+      "question": "How much cash did Boeing have left from operations after spending on property and equipment in 2022?",
+      "split": "development"
+    },
+    {
+      "document": "BOEING_2022_10K",
+      "expected": [
+        57
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "metric",
+      "question": "What was Boeing's current ratio at the end of 2022?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        3
+      ],
+      "document": "BOEING_2022_10K",
+      "expected": [
+        87
+      ],
+      "first_run_ranks": [
+        3
+      ],
+      "kind": "notes",
+      "question": "How did Boeing's reserve for environmental cleanup change during 2022?",
+      "split": "development"
+    },
+    {
+      "document": "BOEING_2022_10K",
+      "expected": [
+        94
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "notes",
+      "question": "How much principal on Boeing debt is scheduled to come due in each of the next five years?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1,
+        2
+      ],
+      "document": "COCACOLA_2022_10K",
+      "expected": [
+        63,
+        65
+      ],
+      "first_run_ranks": [
+        1,
+        2
+      ],
+      "kind": "metric",
+      "question": "What was Coca-Cola's total asset turnover in 2022, using average assets?",
+      "split": "development"
+    },
+    {
+      "document": "COCACOLA_2022_10K",
+      "expected": [
+        66
+      ],
+      "first_run_ranks": [
+        2
+      ],
+      "kind": "metric",
+      "question": "How much cash did Coca-Cola's operations produce in 2022?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "document": "COCACOLA_2022_10K",
+      "expected": [
+        75
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "notes",
+      "question": "Does Coca-Cola face any upper limit on the performance-linked extra payments for its fairlife acquisition?",
+      "split": "development"
+    },
+    {
+      "document": "COCACOLA_2022_10K",
+      "expected": [
+        89
+      ],
+      "first_run_ranks": [
+        2
+      ],
+      "kind": "notes",
+      "question": "How much cash did Coca-Cola pay toward its operating lease obligations during 2022?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "document": "CVSHEALTH_2022_10K",
+      "expected": [
+        108
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "metric",
+      "question": "What percentage of CVS Health revenue remained as operating income in 2022?",
+      "split": "development"
+    },
+    {
+      "document": "CVSHEALTH_2022_10K",
+      "expected": [
+        111
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "metric",
+      "question": "How much cash did CVS Health receive from customers and pay to employees during 2022?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "document": "CVSHEALTH_2022_10K",
+      "expected": [
+        147
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "notes",
+      "question": "Why did CVS Health's goodwill balance fall in 2022?",
+      "split": "development"
+    },
+    {
+      "document": "CVSHEALTH_2022_10K",
+      "expected": [
+        149
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "notes",
+      "question": "Why are most of CVS Health's pharmacies rented inside another retailer's stores treated as finance leases?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        2,
+        1
+      ],
+      "document": "ORACLE_2022_10K",
+      "expected": [
+        68,
+        69
+      ],
+      "first_run_ranks": [
+        null,
+        8
+      ],
+      "kind": "metric",
+      "question": "What was Oracle's return on average assets for fiscal 2022?",
+      "split": "development"
+    },
+    {
+      "document": "ORACLE_2022_10K",
+      "expected": [
+        72
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "metric",
+      "question": "How much Oracle operating cash remained after capital expenditure in fiscal 2022?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "document": "ORACLE_2022_10K",
+      "expected": [
+        85
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "notes",
+      "question": "What happened to unvested Cerner employee equity awards when Oracle completed the acquisition?",
+      "split": "development"
+    },
+    {
+      "document": "ORACLE_2022_10K",
+      "expected": [
+        101
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "notes",
+      "question": "How did Oracle's effective income tax rate in fiscal 2022 compare with the United States federal statutory rate?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        19,
+        1
+      ],
+      "document": "PG_E_2022_10K",
+      "expected": [
+        100,
+        101
+      ],
+      "first_run_ranks": [
+        19,
+        1
+      ],
+      "kind": "metric",
+      "question": "What was PG&E Corporation's net working capital at December 31, 2022?",
+      "split": "development"
+    },
+    {
+      "document": "PG_E_2022_10K",
+      "expected": [
+        98
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "metric",
+      "question": "What was PG&E Corporation's operating margin in 2022?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "document": "PG_E_2022_10K",
+      "expected": [
+        122
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "notes",
+      "question": "What benefits did PG&E provide to staff who voluntarily left under its 2022 separation program?",
+      "split": "development"
+    },
+    {
+      "document": "PG_E_2022_10K",
+      "expected": [
+        167
+      ],
+      "first_run_ranks": [
+        1
+      ],
+      "kind": "notes",
+      "question": "What did PG&E disclose about the investigation into the cause of the 2022 Mosquito fire?",
+      "split": "validation"
+    }
+  ],
+  "development": {
+    "after_fix_hits": 15,
+    "expected_pages": 15,
+    "first_run_hits": 14,
+    "queries": 12
+  },
+  "frozen_case_file_sha256": "33e20e6507ef36c4f9a3751b33e2d6994af2c86c7865550af4c680403293ad9e",
+  "frozen_cases_canonical_sha256": "d0b813a6ea51ec01c844a2178f3772aff69830a84fc3762b6fc71a84502261a9",
+  "official_quality_status": "Not measured: official evidence text and relevance labels are unavailable to the candidate.",
+  "origin": "Hand-authored from complete original PDFs; no official FinanceBench questions, answers, gold, or evidence labels were read.",
+  "parsing_window_probe": {
+    "adjudication": "The two missing y tokens are bullet separators on the original rendered page; the independent extractor decodes them as y. Raw failure is retained.",
+    "below_095": [
+      {
+        "document": "JPMORGAN_2022_10K",
+        "excerpt": "that the degree of compliance with the \npolicies or procedures may deteriorate.\nPricewaterhouseCoopers LLP  y  300 Madison Avenue  y  New York, NY 10017\nReport of Independent Registered Public Accounting Firm\n156\nJPMorgan Chase & Co./2022 Form 10-K",
+        "missing": {
+          "y": 2
+        },
+        "page": 158,
+        "recall": 0.9473684210526315,
+        "start_token": 800
+      }
+    ],
+    "minimum_window_tokens": 20,
+    "stride": 20,
+    "window_tokens": 40,
+    "windows": 95986
+  },
+  "runtime": {
+    "documents": 6,
+    "exact_citation_readback": true,
+    "limit": 20,
+    "physical_pages": 1150,
+    "restart": true
+  },
+  "three_m": {
+    "font": "Wingdings-Regular",
+    "glyph_id": 0,
+    "interpretation": "Original embedded font missing glyph, not missing financial prose. Check states cannot be reconstructed. Preserve explicit U+FFFD markers; do not guess.",
+    "missing_glyphs": 5,
+    "physical_page": 1,
+    "word_multisets_unchanged": true
+  },
+  "upstream_pdf_revision": "cc39aeb4afdf33909ee1412188bf89035950c2eb",
+  "validation": {
+    "expected_pages": 12,
+    "first_run_hits": 12,
+    "queries": 12,
+    "used_for_tuning": false
+  }
+}

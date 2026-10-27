@@ -188,8 +188,8 @@ _CONCEPTS = (
 _METRICS = (
     (r"\b(?:current ratio|working capital)\b", ("current assets", "current liabilities"), ("balance",)),
     (r"\b(?:quick ratio|acid test)\b", ("cash", "receivables", "current liabilities"), ("balance",)),
-    (r"\b(?:return on assets|roa)\b", ("net income", "total assets"), ("income", "balance")),
-    (r"\b(?:return on equity|roe)\b", ("net income", "shareholders equity"), ("income", "balance")),
+    (r"\b(?:return on (?:average )?assets|roa)\b", ("net income", "total assets"), ("income", "balance")),
+    (r"\b(?:return on (?:average )?equity|roe)\b", ("net income", "shareholders equity"), ("income", "balance")),
     (
         r"\b(?:return on invested capital|roic)\b",
         ("operating income", "income taxes", "debt", "equity", "cash"),
@@ -464,7 +464,9 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
         pages = []
         for number, page in enumerate(reader.pages, start=1):
             _validate_page_content(page, reader)
-            text = _extract_page_text(page).translate(LATIN_LIGATURES)
+            # Unrecoverable glyphs remain explicit unknowns. Do not let a NUL
+            # terminate downstream text handling or delete it and join words.
+            text = _extract_page_text(page).translate(LATIN_LIGATURES).replace("\0", "\ufffd")
             pages.append(
                 PDFPageInput(
                     document_id=value.document_id,
