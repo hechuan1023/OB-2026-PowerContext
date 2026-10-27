@@ -1011,6 +1011,10 @@ def test_financial_note_paraphrases_retrieve_accounting_terms_after_restart(tmp_
             "This development did not increase operating results because current-period costs offset the revision.",
             "Short-term borrowings include the current portion of long-term debt, principal 250. "
             "A committed revolving credit facility provides liquidity of 7000.",
+            "Geographic revenue by country. United States 200. Canada 100.",
+            "Geographic revenue by country.\nU.K.\n$ 70.\nCanada 30.",
+            "Our reporting currency is US dollars. Contact us for information about revenue figures.",
+            "Property and equipment by country.\nU.S.\n$ 80.\nCanada 30.",
         )
         source_ids = {}
         async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
@@ -1048,6 +1052,16 @@ def test_financial_note_paraphrases_retrieve_accounting_terms_after_restart(tmp_
                     "and what committed bank backstop was available?",
                     8,
                 ),
+                ("What was Briar revenue from the US?", 9),
+                ("What was Briar revenue from the U.S.?", 9),
+                ("What was Briar revenue from the USA?", 9),
+                ("What was Briar revenue from the U.S.A.?", 9),
+                ("What was Briar revenue from the United States?", 9),
+                ("What was Briar revenue from the United Kingdom?", 10),
+                ("What was Briar revenue from the UK?", 10),
+                ("What does Briar tell us about its reporting currency?", 11),
+                ("Does Briar report its revenue figures in US dollars?", 11),
+                ("How much property and equipment did Briar have in the United States?", 12),
             ):
                 citations = await search_pdf_pages(memory, question, limit=1)
                 assert len(citations) == 1

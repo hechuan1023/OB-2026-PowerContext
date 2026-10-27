@@ -295,6 +295,26 @@ _NOTE_CONCEPTS = (
     ),
 )
 _NOTE_PATTERNS = tuple((re.compile(pattern), phrases) for pattern, phrases in _NOTE_CONCEPTS)
+_COUNTRY_NAMES = (
+    (
+        re.compile(r"(?<![\w.])(?:U\.S(?:\.A)?\.?|USA?)(?![\w.])(?!\$|[^\S\r\n]*(?i:dollars?)\b)"),
+        "United States",
+    ),
+    (re.compile(r"(?<![\w.])(?:U\.K\.?|UK)(?![\w.])(?!£|[^\S\r\n]*(?i:pounds?)\b)"), "United Kingdom"),
+)
+
+
+def _normalize_country_names(text: str) -> str:
+    """Match country abbreviations in derived search text, preserving currency.
+
+    Apply before case folding so the English pronoun ``us`` remains distinct.
+    Currency guards stay on one line so a table's country label followed by a
+    dollar amount on the next line is still recognized. The original page text
+    and source identity are never changed.
+    """
+    for pattern, country in _COUNTRY_NAMES:
+        text = pattern.sub(country, text)
+    return text
 
 
 def _normalize_question(question: str) -> str:
@@ -721,7 +741,7 @@ def _primary_statement_kinds(question: str) -> tuple[str, ...]:
 
 
 def _query_plan(question: str) -> tuple[tuple[str, ...], dict[str, float], tuple[str, ...]]:
-    normalized = _normalize_question(question)
+    normalized = _normalize_question(_normalize_country_names(question))
     words = tuple(dict.fromkeys(word for word in _WORDS.findall(normalized) if word not in _STOPWORDS))
     weights = {_stem(word): 1.0 for word in words if not word.isdigit()}
     phrases: list[str] = []
@@ -913,7 +933,11 @@ def _defined_abbreviations(body: str, issuer: str = "") -> list[tuple[str, froze
 
 def _expand_document_terms(hits: list[MemoryHit], question: str, weights: dict[str, float]) -> dict[str, float]:
     weights = dict(weights)
-    question_terms = {_stem(word) for word in _WORDS.findall(_normalize_question(question)) if word not in _STOPWORDS}
+    question_terms = {
+        _stem(word)
+        for word in _WORDS.findall(_normalize_question(_normalize_country_names(question)))
+        if word not in _STOPWORDS
+    }
     for hit in hits:
         for abbreviation, expansion in _defined_abbreviations(
             hit.text.partition("\n")[2], _company_name(_document_name(hit))
@@ -1129,7 +1153,8 @@ def _rank_pages(
         for word in query_tokens[start:end]
     }
     weights = {term: weight for term, weight in weights.items() if term not in subject_terms} or weights
-    tokens = [[_stem(word) for word in _WORDS.findall(hit.text.partition("\n")[2].casefold())] for hit in hits]
+    search_bodies = [_normalize_country_names(hit.text.partition("\n")[2]).casefold() for hit in hits]
+    tokens = [[_stem(word) for word in _WORDS.findall(body)] for body in search_bodies]
     terms = [Counter(words) for words in tokens]
     frequency = Counter(term for counts in terms for term in counts)
     average_length = max(1.0, sum(sum(counts.values()) for counts in terms) / len(terms))
@@ -1138,7 +1163,7 @@ def _rank_pages(
     statement_kinds = _primary_statement_kinds(question)
     scores = []
     titles: dict[tuple[str, str, str], dict[str, int]] = {}
-    for hit, counts, words in zip(hits, terms, tokens, strict=True):
+    for hit, counts, words, search_body in zip(hits, terms, tokens, search_bodies, strict=True):
         page_score = _lexical_score(counts, weights, idf, average_length)
         # Overlapping passages keep nearby sentences/table rows together while
         # retaining the complete physical page as the only returned identity.
@@ -1155,7 +1180,7 @@ def _rank_pages(
         # A question's company and reporting year identify the document, while
         # the body determines the evidence page within it.
         entity_overlap = len((document_terms - {"10", "k", "annual", "report"}) & query_words)
-        compact_body = " ".join(_WORDS.findall(body.casefold()))
+        compact_body = " ".join(_WORDS.findall(search_body))
         phrase_score = sum(0.8 for phrase in phrases if phrase in compact_body)
         identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
         titles[identity] = {kind: _statement_title_quality(body, kind) for kind in statement_kinds}
