@@ -481,6 +481,6 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
 
 ## 相关文档
 
-- [新手上手指南](新手上手指南.md) — 从零跑通
-- [接入指南](接入指南.md) — 接到 AI 助手里
-- [设计说明](设计说明.md) — 判定规则细节
+- [新手上手指南](sdd-context-getting-started.md) — 从零跑通
+- [接入指南](sdd-context-integration.md) — 接到 AI 助手里
+- [设计说明](sdd-context-design.md) — 判定规则细节

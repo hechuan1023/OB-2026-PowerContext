@@ -679,7 +679,7 @@ python -m powercontext_sdd baseline --context context.json --code-root "C:\你�
 
 ### 6.4 第四步：接进你的 AI 助手
 
-见 [接入指南](接入指南.md)。最简单的一条是 MCP：
+见 [接入指南](sdd-context-integration.md)。最简单的一条是 MCP：
 
 ```json
 {
@@ -848,15 +848,15 @@ prompt = render_prompt_context(bundle)   # 直接拼进你的 prompt
 ### 层次 3：MCP 服务端（半天，推荐）
 
 AI 助手自己决定什么时候调 `resolve_context`，不需要你手动粘贴。
-详见 [接入指南](接入指南.md)。
+详见 [接入指南](sdd-context-integration.md)。
 
 ---
 
 ## 第 8 章：跑测试、跑演示、交付前自查清单
 
 ```bash
-python -m unittest discover -s tests/powercontext_sdd -t .     # 期望：Ran 68 tests ... OK
-python examples/sdd-context-manager/demo_change.py                  # 期望：18/18 项通过
+python -m unittest discover -s tests/powercontext_sdd -t .            # 期望：Ran 68 tests ... OK
+python examples/sdd-context-manager/demo_change.py                    # 期望：18/18 项通过
 ```
 
 **交付前逐项确认：**
@@ -865,6 +865,7 @@ python examples/sdd-context-manager/demo_change.py                  # 期望：1
 - [ ] `python examples/sdd-context-manager/demo_change.py` 输出 `18/18 项通过`
 - [ ] `python -m powercontext_sdd resolve ... --context examples/sdd-context-manager/sample-app` 能正常输出
 - [ ] `python -m powercontext_sdd mcp --context examples/sdd-context-manager/sample-app` 能启动（`Ctrl+C` 退出）
+- [ ] `python -m powercontext_sdd verify --context tests/powercontext_sdd/fixtures/self-context --code-root .` 7 条验证全是「有效」
 - [ ] `docs/zh/development/sdd-context-verification.md` 里有**真实运行输出**的截图或粘贴文本
 - [ ] `context.json` 里没有硬编码的绝对路径（换台机器要还能跑）
 - [ ] 没有把 `.env`、密钥之类的东西提交进去
@@ -876,7 +877,7 @@ python examples/sdd-context-manager/demo_change.py                  # 期望：1
 | 症状 | 可能原因 | 处理 |
 |---|---|---|
 | `python` 不是命令 | Windows 商店占位符 | 改用 `py`，或重装时勾 `Add to PATH` |
-| `ModuleNotFoundError: powercontext_sdd` | 不在项目根目录 | `cd` 到有 `src/powercontext_sdd/` 的那一层 |
+| `ModuleNotFoundError: powercontext_sdd` | 没把 `src` 放进 `PYTHONPATH` | 见 2.3：`export PYTHONPATH="$PWD/src"`，或在仓库根目录 `pip install -e .` |
 | 中文输出乱码 | 终端代码页 | `set PYTHONIOENCODING=utf-8`（Windows）或 `export PYTHONIOENCODING=utf-8` |
 | 验证全是 `unknown` | 没建基线 | 跑 `python -m powercontext_sdd baseline` |
 | 验证全是 `stale_code` | 基线是旧代码的 | 确认代码是好的后重跑 `python -m powercontext_sdd baseline` |
@@ -894,7 +895,7 @@ python examples/sdd-context-manager/demo_change.py                  # 期望：1
 
 ## 下一步
 
-- 想把模块接进 Claude Code / Cursor / Qoder / 其他 MCP 客户端 → [接入指南](接入指南.md)
-- 想知道判定规则的具体实现细节 → [设计说明](设计说明.md)
-- 想看「效果如何验证」的完整证据链 → [验证报告](验证报告.md)
+- 想把模块接进 Claude Code / Cursor / Qoder / 其他 MCP 客户端 → [接入指南](sdd-context-integration.md)
+- 想知道判定规则的具体实现细节 → [设计说明](sdd-context-design.md)
+- 想看「效果如何验证」的完整证据链 → [验证报告](sdd-context-verification.md)
 - 想知道每个命令的完整参数 → `python -m powercontext_sdd <子命令> --help`

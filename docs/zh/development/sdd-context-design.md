@@ -419,6 +419,6 @@ C++ / Java 等语言需要扩展 `deps.py` 里的解析器。这是已知的边�
 
 ## 相关文档
 
-- [新手上手指南](新手上手指南.md) — 从零跑通
-- [接入指南](接入指南.md) — 接到 AI 助手里
-- [验证报告](验证报告.md) — 效果证据
+- [新手上手指南](sdd-context-getting-started.md) — 从零跑通
+- [接入指南](sdd-context-integration.md) — 接到 AI 助手里
+- [验证报告](sdd-context-verification.md) — 效果证据

@@ -303,6 +303,6 @@ asyncio.run(main())
 
 ## 相关文档
 
-- [新手上手指南](新手上手指南.md) — 从零跑通
-- [设计说明](设计说明.md) — 判定规则细节
-- [验证报告](验证报告.md) — 效果证据
+- [新手上手指南](sdd-context-getting-started.md) — 从零跑通
+- [设计说明](sdd-context-design.md) — 判定规则细节
+- [验证报告](sdd-context-verification.md) — 效果证据
