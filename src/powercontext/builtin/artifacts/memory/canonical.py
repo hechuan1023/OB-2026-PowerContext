@@ -78,11 +78,11 @@ def canonical_json(value: object) -> bytes:
     return rfc8785.dumps(_validated_json(value))
 
 
-def normalize_text(value: str) -> str:
-    """Normalize and validate one durable entry body."""
+def normalize_text(value: str, *, enforce_limit: bool = True) -> str:
+    """Normalize an entry body, bounding unverified proposed text by default."""
 
     normalized = _normalize_non_empty_string(value, "memory entry text")
-    if len(normalized.encode("utf-8")) > 8192:
+    if enforce_limit and len(normalized.encode("utf-8")) > 8192:
         raise _CanonicalValueError("text-too-long")
     return normalized
 
@@ -160,7 +160,9 @@ def entry_content_bytes(
 
     return canonical_json({
         "kind": normalize_kind(kind),
-        "text": normalize_text(text),
+        # Size eligibility is checked when accepting a proposed entry. A
+        # complete source projection can be longer than a generated summary.
+        "text": normalize_text(text, enforce_limit=False),
         "source_refs": normalize_refs(source_refs),
         "artifact_refs": normalize_refs(artifact_refs),
     })

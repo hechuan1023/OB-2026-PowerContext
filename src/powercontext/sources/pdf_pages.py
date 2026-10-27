@@ -39,6 +39,7 @@ from pypdf.generic import (
 
 from powercontext.builtin.artifacts.memory.models import MemoryCitation, MemoryHit
 from powercontext.builtin.runtime.models import GetMemoryEntryRequest, SearchMemoryRequest
+from powercontext.sources._pdf_layout import positioned_page_text
 from powercontext.sources._pdf_unicode import LATIN_LIGATURES, restore_pdf_unicode
 from powercontext.sources.definitions import AdapterSourceDefinition
 from powercontext.sources.models import Source, SourceMaterialization
@@ -438,27 +439,29 @@ def _fragmented_letters(text: str) -> int:
 
 def _extract_page_text(page: PageObject) -> str:
     text = page.extract_text() or ""
+    if not text.strip():
+        return ""
+    # Plain extraction can insert spaces inside a word or join adjacent words
+    # when a PDF draws text in short, independently positioned runs. This also
+    # affects ordinary prose with no sequence of isolated letters to flag it.
+    # Prefer geometric spacing only when it preserves every visible character.
+    layout = positioned_page_text(page)
+    if Counter(re.sub(r"\s", "", layout)) == Counter(re.sub(r"\s", "", text)):
+        return "\n".join(" ".join(line.split()) for line in layout.splitlines()).strip()
     fragments = _fragmented_letters(text)
     if fragments:
-        # Narrow font-space metrics can make plain extraction split every letter.
-        # Reconstruct spacing from glyph positions, retaining rotated text and
-        # accepting the alternative only when every non-whitespace character survives.
         layout = page.extract_text(extraction_mode="layout", layout_mode_strip_rotated=False)
-        if _fragmented_letters(layout) < fragments and Counter(re.sub(r"\s", "", layout)) == Counter(
-            re.sub(r"\s", "", text)
-        ):
-            text = layout
-        else:
-            # Layout mode may omit graph labels or overlapping text. In that
-            # case preserve the original page and repair only sequences for
-            # which layout provides an unambiguous, character-identical span.
-            def restore_spacing(match: re.Match[str]) -> str:
-                characters = re.sub(r"\s", "", match.group())
-                pattern = r"(?<!\w)" + r"\s*".join(re.escape(char) for char in characters) + r"(?!\w)"
-                alternatives = {" ".join(span.split()) for span in re.findall(pattern, layout)}
-                return alternatives.pop() if len(alternatives) == 1 else match.group()
 
-            text = re.sub(r"(?<!\w)[A-Za-z0-9](?:[ \t]+[A-Za-z0-9]){3,}(?!\w)", restore_spacing, text)
+        # Layout mode may omit graph labels or overlapping text. In that
+        # case preserve the original page and repair only sequences for
+        # which layout provides an unambiguous, character-identical span.
+        def restore_spacing(match: re.Match[str]) -> str:
+            characters = re.sub(r"\s", "", match.group())
+            pattern = r"(?<!\w)" + r"\s*".join(re.escape(char) for char in characters) + r"(?!\w)"
+            alternatives = {" ".join(span.split()) for span in re.findall(pattern, layout)}
+            return alternatives.pop() if len(alternatives) == 1 else match.group()
+
+        text = re.sub(r"(?<!\w)[A-Za-z0-9](?:[ \t]+[A-Za-z0-9]){3,}(?!\w)", restore_spacing, text)
     return text if text.strip() else ""
 
 

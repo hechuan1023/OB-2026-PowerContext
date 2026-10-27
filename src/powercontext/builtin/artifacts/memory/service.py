@@ -1654,11 +1654,20 @@ class MemoryService:
             sources = (*previous.sources, *candidate_source_refs)
             artifacts = (*previous.artifacts, *candidate_artifacts)
         try:
+            normalized = normalize_text(candidate.text, enforce_limit=False)
+            complete_source_body = len(normalized.encode("utf-8")) > 8192 and any(
+                content is not None
+                and bool(content.strip())
+                and normalize_text(content, enforce_limit=False) == normalized
+                for source in candidate_sources
+                for content in (_source_gate_content(source, self._source_resolver),)
+            )
             return self._entry_material(
                 kind=candidate.kind,
-                text=candidate.text,
+                text=normalized,
                 sources=sources,
                 artifacts=artifacts,
+                complete_source_body=complete_source_body,
             )
         except (TypeError, ValueError) as error:
             raise InvalidMemoryCandidateError(
@@ -1706,6 +1715,8 @@ class MemoryService:
             text=version.text,
             sources=version.sources,
             artifacts=version.artifacts,
+            # The immutable version already passed candidate validation.
+            complete_source_body=True,
         )
 
     def _entry_material(
@@ -1715,9 +1726,10 @@ class MemoryService:
         text: str,
         sources: Sequence[SourceRef],
         artifacts: Sequence[ArtifactRef],
+        complete_source_body: bool = False,
     ) -> _EntryMaterial:
         normalized_kind = normalize_kind(kind)
-        normalized_text = normalize_text(text)
+        normalized_text = normalize_text(text, enforce_limit=not complete_source_body)
         canonical_sources = _canonical_source_refs(sources)
         canonical_artifacts = _canonical_artifact_refs(artifacts)
         source_refs = tuple(source.model_dump(mode="json") for source in canonical_sources)
@@ -1824,7 +1836,7 @@ def _raise_if_write_held(plan: MemoryWritePlan) -> None:
 
 
 def _bounded_gate_evidence(identity: str, content: str) -> _GateEvidenceEntry:
-    normalized = normalize_text(content)
+    normalized = normalize_text(content, enforce_limit=False)
     return _GateEvidenceEntry(
         text=f"{identity}\n{normalized[:_GATE_EVIDENCE_TEXT_LIMIT]}",
         complete=len(normalized) <= _GATE_EVIDENCE_TEXT_LIMIT,

@@ -35,6 +35,7 @@ from pypdf.generic import (
 )
 
 from powercontext.builtin.artifacts.memory import MemoryEntryInput
+from powercontext.builtin.artifacts.memory.errors import InvalidMemoryCandidateError
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
 from powercontext.builtin.runtime import (
     BuiltinConfig,
@@ -119,6 +120,100 @@ def test_narrow_font_spacing_keeps_words_numbers_and_rotated_text(rotated: bool)
     if rotated:
         assert "Side note 42" in pages[0].text
     assert pages[1].text == ""
+
+
+def test_positioned_word_fragments_preserve_words_without_isolated_letter_runs() -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=600, height=400)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+        NameObject("/FirstChar"): NumberObject(32),
+        NameObject("/LastChar"): NumberObject(126),
+        NameObject("/Widths"): ArrayObject([NumberObject(200)] + [NumberObject(600)] * 94),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})
+    })
+    stream = DecodedStreamObject()
+    stream.set_data(
+        b"BT /F1 12 Tf 30 300 Td [(Finan) -100 (cial statements show inven) -100"
+        b" (tories and net sales of 1234.50.)] TJ ET"
+    )
+    page.replace_contents(stream.flate_encode())
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="Positioned-words", content=output.getvalue()))
+    assert len(pages) == 1
+    assert pages[0].text == "Financial statements show inventories and net sales of 1234.50."
+
+
+def test_tight_multiline_table_headers_keep_word_boundaries() -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=300, height=400)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})
+    })
+    stream = DecodedStreamObject()
+    stream.set_data(b"BT /F1 12 Tf 30 300 Td (Number) Tj 5 -10 Td (Shares) Tj ET")
+    page.replace_contents(stream.flate_encode())
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="Table-headers", content=output.getvalue()))
+    assert pages[0].text.split() == ["Number", "Shares"]
+
+
+def test_unused_oversized_space_glyph_does_not_join_table_columns() -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=300, height=400)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+        NameObject("/FirstChar"): NumberObject(32),
+        NameObject("/LastChar"): NumberObject(126),
+        NameObject("/Widths"): ArrayObject([NumberObject(8000)] + [NumberObject(600)] * 94),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})
+    })
+    stream = DecodedStreamObject()
+    stream.set_data(b"BT /F1 12 Tf 30 300 Td (1995) Tj 60 0 Td (66) Tj ET")
+    page.replace_contents(stream.flate_encode())
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="Table-columns", content=output.getvalue()))
+    assert pages[0].text.split() == ["1995", "66"]
+
+
+@pytest.mark.parametrize("prefix", [b"(fin) Tj (an) Tj", b"[(fin) (an)] TJ"])
+def test_consecutive_text_show_operands_advance_before_positioned_suffix(prefix: bytes) -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=300, height=400)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+        NameObject("/FirstChar"): NumberObject(32),
+        NameObject("/LastChar"): NumberObject(126),
+        NameObject("/Widths"): ArrayObject([NumberObject(200)] + [NumberObject(600)] * 94),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})
+    })
+    stream = DecodedStreamObject()
+    stream.set_data(b"BT /F1 12 Tf 30 300 Td " + prefix + b" 1 0 0 1 66 300 Tm (cial) Tj ET")
+    page.replace_contents(stream.flate_encode())
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="Successive-text", content=output.getvalue()))
+    assert pages[0].text == "financial"
 
 
 def test_all_text_and_blank_pages_keep_exact_physical_provenance() -> None:
@@ -443,6 +538,55 @@ class _PagePipeline:
             )
             for source in request.sources
         )
+
+
+@pytest.mark.parametrize("mode", ["exact", "altered", "unreferenced"])
+def test_complete_long_page_survives_restart_without_relaxing_generated_text_limit(tmp_path: Path, mode: str) -> None:
+    class Pipeline(_PagePipeline):
+        async def extract(self, request, /) -> tuple[MemoryEntryInput, ...]:
+            entries = await super().extract(request)
+            if mode == "altered":
+                return tuple(
+                    entry.model_copy(update={"text": entry.text + " invented conclusion"}) for entry in entries
+                )
+            if mode == "unreferenced":
+                return tuple(entry.model_copy(update={"sources": ()}) for entry in entries)
+            return entries
+
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'long-page.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        body = "Operating lease obligations and payments 1234.50. " * 200
+        source = await registry.resolve(
+            PDFPageInput(document_id="DENSE_REPORT", document_sha256="a" * 64, page_number=1, text=body)
+        )
+        expected = f"DENSE_REPORT\n{body}".strip()
+        assert len(expected.encode("utf-8")) > 8192
+        async with open_builtin_runtime(config, candidate_pipeline=Pipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(ScopeDraft(title="Dense", summary="Full page", idempotency_key="dense"))
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            await runtime.ingestion.submit(
+                SubmitSourceObservation(
+                    scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                )
+            )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            if mode != "exact":
+                with pytest.raises(InvalidMemoryCandidateError, match="8192 UTF-8 bytes"):
+                    await memory.flush()
+                return
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            citations = await search_pdf_pages(memory, "What are the dense report lease obligations?", limit=1)
+            assert len(citations) == 1
+            entry = (await memory.get(GetMemoryEntryRequest(citation=citations[0]))).entry
+            assert entry.text == expected
+            assert entry.sources[0].source_id == source.name
+
+    asyncio.run(run())
 
 
 def test_compound_financial_question_preserves_main_statement_pages(tmp_path: Path) -> None:

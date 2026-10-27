@@ -1,0 +1,294 @@
+{
+  "provenance": "Independent development questions; target physical pages manually read from original PDFs. No official question labels or gold were used.",
+  "pdf_revision": "cc39aeb4afdf33909ee1412188bf89035950c2eb",
+  "cases": [
+    {
+      "document": "BESTBUY_2021_10K",
+      "question": "Calculate Best Buy return on average assets for 2021.",
+      "expected": [
+        41,
+        42
+      ]
+    },
+    {
+      "document": "BESTBUY_2021_10K",
+      "question": "What was Best Buy operating profit as a percentage of sales in 2021?",
+      "expected": [
+        42
+      ]
+    },
+    {
+      "document": "BESTBUY_2021_10K",
+      "question": "How much did Best Buy spend on capital expenditures in 2021?",
+      "expected": [
+        44
+      ]
+    },
+    {
+      "document": "BESTBUY_2021_10K",
+      "question": "How much did Best Buy spend on advertising in fiscal 2021?",
+      "expected": [
+        54
+      ]
+    },
+    {
+      "document": "BESTBUY_2021_10K",
+      "question": "When does Best Buy recognize revenue for customer gift card sales incentives?",
+      "expected": [
+        53
+      ]
+    },
+    {
+      "document": "COSTCO_2018_10K",
+      "question": "Calculate Costco return on average assets for 2018.",
+      "expected": [
+        36,
+        37
+      ]
+    },
+    {
+      "document": "COSTCO_2018_10K",
+      "question": "What was Costco operating profit as a percentage of sales in 2018?",
+      "expected": [
+        37
+      ]
+    },
+    {
+      "document": "COSTCO_2018_10K",
+      "question": "How much did Costco spend on capital expenditures in 2018?",
+      "expected": [
+        40
+      ]
+    },
+    {
+      "document": "COSTCO_2018_10K",
+      "question": "How much was Costco rental expense in 2018?",
+      "expected": [
+        52
+      ]
+    },
+    {
+      "document": "COSTCO_2018_10K",
+      "question": "What kinds of receivables does Costco hold?",
+      "expected": [
+        43
+      ]
+    },
+    {
+      "document": "GENERALMILLS_2020_10K",
+      "question": "Calculate General Mills return on average assets for 2020.",
+      "expected": [
+        50,
+        48
+      ]
+    },
+    {
+      "document": "GENERALMILLS_2020_10K",
+      "question": "What was General Mills operating profit as a percentage of sales in 2020?",
+      "expected": [
+        48
+      ]
+    },
+    {
+      "document": "GENERALMILLS_2020_10K",
+      "question": "How much did General Mills spend on capital expenditures in 2020?",
+      "expected": [
+        52
+      ]
+    },
+    {
+      "document": "GENERALMILLS_2020_10K",
+      "question": "What were General Mills operating lease costs in 2020?",
+      "expected": [
+        62
+      ]
+    },
+    {
+      "document": "GENERALMILLS_2020_10K",
+      "question": "How does General Mills manage raw material price fluctuations?",
+      "expected": [
+        64
+      ]
+    },
+    {
+      "document": "JOHNSON_JOHNSON_2019_10K",
+      "question": "Calculate Johnson & Johnson return on average assets for 2019.",
+      "expected": [
+        41,
+        42
+      ]
+    },
+    {
+      "document": "JOHNSON_JOHNSON_2019_10K",
+      "question": "What was Johnson & Johnson operating profit as a percentage of sales in 2019?",
+      "expected": [
+        42
+      ]
+    },
+    {
+      "document": "JOHNSON_JOHNSON_2019_10K",
+      "question": "How much did Johnson & Johnson spend on capital expenditures in 2019?",
+      "expected": [
+        45
+      ]
+    },
+    {
+      "document": "JOHNSON_JOHNSON_2019_10K",
+      "question": "What deferred tax assets did Johnson & Johnson report for employee obligations in 2019?",
+      "expected": [
+        66
+      ]
+    },
+    {
+      "document": "JOHNSON_JOHNSON_2019_10K",
+      "question": "What adjustments did Johnson & Johnson make when finalizing its accounting for US tax reform?",
+      "expected": [
+        65
+      ]
+    },
+    {
+      "document": "MICROSOFT_2021_10K",
+      "question": "Calculate Microsoft return on average assets for 2021.",
+      "expected": [
+        59,
+        57
+      ]
+    },
+    {
+      "document": "MICROSOFT_2021_10K",
+      "question": "What was Microsoft operating profit as a percentage of sales in 2021?",
+      "expected": [
+        57
+      ]
+    },
+    {
+      "document": "MICROSOFT_2021_10K",
+      "question": "How much did Microsoft spend on capital expenditures in 2021?",
+      "expected": [
+        60
+      ]
+    },
+    {
+      "document": "MICROSOFT_2021_10K",
+      "question": "What interest expense did Microsoft report in 2021?",
+      "expected": [
+        70
+      ]
+    },
+    {
+      "document": "MICROSOFT_2021_10K",
+      "question": "How much did Microsoft hold in commercial paper at June 30, 2021?",
+      "expected": [
+        71
+      ]
+    },
+    {
+      "document": "PFIZER_2022_10K",
+      "question": "Calculate Pfizer return on average assets for 2022.",
+      "expected": [
+        56,
+        54
+      ]
+    },
+    {
+      "document": "PFIZER_2022_10K",
+      "question": "What was Pfizer operating profit as a percentage of sales in 2022?",
+      "expected": [
+        54
+      ]
+    },
+    {
+      "document": "PFIZER_2022_10K",
+      "question": "How much did Pfizer spend on capital expenditures in 2022?",
+      "expected": [
+        58
+      ]
+    },
+    {
+      "document": "PFIZER_2022_10K",
+      "question": "Why did Pfizer effective income tax rate rise in 2022 compared with 2021?",
+      "expected": [
+        76
+      ]
+    },
+    {
+      "document": "PFIZER_2022_10K",
+      "question": "What was Pfizer US pension benefit obligation at the start of 2022?",
+      "expected": [
+        89
+      ]
+    },
+    {
+      "document": "VERIZON_2020_10K",
+      "question": "Calculate Verizon return on average assets for 2020.",
+      "expected": [
+        56,
+        54
+      ]
+    },
+    {
+      "document": "VERIZON_2020_10K",
+      "question": "What was Verizon operating profit as a percentage of sales in 2020?",
+      "expected": [
+        54
+      ]
+    },
+    {
+      "document": "VERIZON_2020_10K",
+      "question": "How much did Verizon spend on capital expenditures in 2020?",
+      "expected": [
+        57
+      ]
+    },
+    {
+      "document": "VERIZON_2020_10K",
+      "question": "What spectrum licenses did Verizon acquire through FCC auctions?",
+      "expected": [
+        71
+      ]
+    },
+    {
+      "document": "VERIZON_2020_10K",
+      "question": "What was the net value of Verizon device installment receivables at year end 2020?",
+      "expected": [
+        83
+      ]
+    },
+    {
+      "document": "WALMART_2021_10K",
+      "question": "Calculate Walmart return on average assets for 2021.",
+      "expected": [
+        56,
+        54
+      ]
+    },
+    {
+      "document": "WALMART_2021_10K",
+      "question": "What was Walmart operating profit as a percentage of sales in 2021?",
+      "expected": [
+        54
+      ]
+    },
+    {
+      "document": "WALMART_2021_10K",
+      "question": "How much did Walmart spend on capital expenditures in 2021?",
+      "expected": [
+        58
+      ]
+    },
+    {
+      "document": "WALMART_2021_10K",
+      "question": "How does Walmart value inventories across its business segments?",
+      "expected": [
+        60
+      ]
+    },
+    {
+      "document": "WALMART_2021_10K",
+      "question": "What was the fair value of Walmart long-term debt in 2021?",
+      "expected": [
+        72
+      ]
+    }
+  ]
+}
