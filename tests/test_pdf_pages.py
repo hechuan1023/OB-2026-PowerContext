@@ -1015,6 +1015,16 @@ def test_financial_note_paraphrases_retrieve_accounting_terms_after_restart(tmp_
             "Geographic revenue by country.\nU.K.\n$ 70.\nCanada 30.",
             "Our reporting currency is US dollars. Contact us for information about revenue figures.",
             "Property and equipment by country.\nU.S.\n$ 80.\nCanada 30.",
+            "Unearned revenue. Revenue allocated to remaining performance obligations was 800. "
+            "We expect to recognize half within the next twelve months.",
+            "Revenue recognition: standalone selling price. If that price is not observable, we use market conditions and "
+            "other inputs to allocate consideration among distinct performance obligations.",
+            "Asset-backed debt. The ABS entities are variable interest entities. We are the primary beneficiary "
+            "and their assets and liabilities are consolidated in our financial statements.",
+            "Impairment. A charge of 96 was recorded for an equity-method investee in Lydia. "
+            "The decline was other than temporary.",
+            "Liquidity. Undrawn revolving credit facility 400. Commercial paper program capacity 300. "
+            "No amounts were outstanding under either facility.",
         )
         source_ids = {}
         async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
@@ -1062,6 +1072,15 @@ def test_financial_note_paraphrases_retrieve_accounting_terms_after_restart(tmp_
                 ("What does Briar tell us about its reporting currency?", 11),
                 ("Does Briar report its revenue figures in US dollars?", 11),
                 ("How much property and equipment did Briar have in the United States?", 12),
+                ("How much income from deals already signed has Briar not yet earned?", 13),
+                (
+                    "How does Briar split the price of software licences and services when an item has "
+                    "no separate selling price?",
+                    14,
+                ),
+                ("Why do customer balances Briar borrowed against remain in its accounts?", 15),
+                ("What loss did Briar report after permanently lowering the value of a Lydian investment?", 16),
+                ("What unused borrowing options did Briar have available?", 17),
             ):
                 citations = await search_pdf_pages(memory, question, limit=1)
                 assert len(citations) == 1

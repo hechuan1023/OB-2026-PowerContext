@@ -240,6 +240,29 @@ _METRIC_PATTERNS = tuple((re.compile(pattern), phrases, kinds) for pattern, phra
 # natural-language questions reach notes whose wording differs from the query.
 _NOTE_CONCEPTS = (
     (
+        r"\b(?:borrowing (?:options|capacity)|(?:unused|undrawn) (?:credit|facilit(?:y|ies)|loans?))\b",
+        ("credit facility", "commercial paper", "liquidity"),
+    ),
+    (
+        r"\b(?:impairment|impaired|write downs?|written down|loss of value)\b|"
+        r"\b(?:lower(?:ed|ing)?|reduc(?:ed|ing)?)\b.{0,25}\bvalue\b",
+        ("impairment", "write down", "carrying value"),
+    ),
+    (
+        r"\b(?:unearned|deferred revenue|contract liabilities|remaining performance obligations)\b|"
+        r"\b(?:contracts?|deals?)\b(?=.{0,100}\b(?:not|yet)\b.{0,30}\bearned\b)",
+        ("unearned revenue", "deferred revenue", "remaining performance obligations", "contract liabilities"),
+    ),
+    (
+        r"\b(?:standalone|stand alone|separate) selling price\b|"
+        r"\b(?:price|consideration)\b(?=.{0,120}\b(?:split|divided|allocated|items?)\b)",
+        ("standalone selling price", "performance obligations", "transaction price"),
+    ),
+    (
+        r"\b(?:securiti[sz](?:ation|ed)|asset backed|borrow(?:ed|ing)? against)\b",
+        ("asset backed debt", "receivables", "variable interest entities", "primary beneficiary"),
+    ),
+    (
         r"\b(?:vendors?|suppliers?|trade creditors?)\b",
         ("suppliers", "accounts payable", "trade payables"),
     ),
@@ -613,6 +636,10 @@ PDF_PAGE_SOURCE_DEFINITION = AdapterSourceDefinition[PDFPageInput, PDFPageSource
 
 
 def _stem(word: str) -> str:
+    if word.startswith(("licence", "licenci")):
+        word = "licens" + word[6:]
+    if word in {"investee", "investees"}:
+        return "investment"
     # Keep financial nouns and their common verb forms together, without an
     # aggressive suffix stemmer conflating unrelated short company names.
     if word in {"tax", "taxes", "taxed", "taxation", "taxing"}:
@@ -620,6 +647,7 @@ def _stem(word: str) -> str:
     if word in {"expense", "expenses", "expensed", "expensing"}:
         return "expense"
     for root in (
+        "licens",
         "amortiz",
         "depreciat",
         "recogniz",
@@ -938,10 +966,23 @@ def _expand_document_terms(hits: list[MemoryHit], question: str, weights: dict[s
         for word in _WORDS.findall(_normalize_question(_normalize_country_names(question)))
         if word not in _STOPWORDS
     }
+    # Regular geographical adjectives can name a country in a different form
+    # (Indian/India, Canadian/Canada). Admit a derived name only when the actual
+    # document contains that capitalized name; no report-specific alias table.
+    adjective_variants = {
+        variant
+        for word in _WORDS.findall(question.casefold())
+        if len(word) >= 5 and word.endswith("an")
+        for variant in (word[:-1], word[:-2], word[:-3], word[:-3] + "a", word[:-3] + "ia")
+        if len(variant) >= 4
+    }
     for hit in hits:
-        for abbreviation, expansion in _defined_abbreviations(
-            hit.text.partition("\n")[2], _company_name(_document_name(hit))
-        ):
+        body = hit.text.partition("\n")[2]
+        if adjective_variants:
+            names = {name.casefold() for name in re.findall(r"\b(?:[A-Z][a-z]{3,}|[A-Z]{4,})\b", body)}
+            for name in sorted(adjective_variants & names):
+                weights[_stem(name)] = max(weights.get(_stem(name), 0.0), 0.7)
+        for abbreviation, expansion in _defined_abbreviations(body, _company_name(_document_name(hit))):
             if expansion <= question_terms:
                 weights[abbreviation] = max(weights.get(abbreviation, 0.0), 1.0)
             elif abbreviation in question_terms:
