@@ -1,0 +1,400 @@
+{
+  "baseline_commit": "c0842b567b3e9501d483b89112dfa9130159a083",
+  "cases": [
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "baseline_ranks": [
+        1
+      ],
+      "expected": [
+        [
+          "APPLE_2022_10K",
+          32
+        ]
+      ],
+      "question": "What was AAPL operating margin in 2022?",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        2,
+        1
+      ],
+      "baseline_ranks": [
+        null,
+        1
+      ],
+      "expected": [
+        [
+          "ORACLE_2022_10K",
+          68
+        ],
+        [
+          "ORACLE_2022_10K",
+          69
+        ]
+      ],
+      "question": "What was ORCL return on average assets in 2022?",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        2,
+        1
+      ],
+      "baseline_ranks": [
+        null,
+        null
+      ],
+      "expected": [
+        [
+          "PG_E_2022_10K",
+          100
+        ],
+        [
+          "PG_E_2022_10K",
+          101
+        ]
+      ],
+      "question": "What was PCG working capital in 2022?",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        1,
+        3,
+        4,
+        2
+      ],
+      "baseline_ranks": [
+        1,
+        2,
+        6,
+        19
+      ],
+      "expected": [
+        [
+          "APPLE_2022_10K",
+          32
+        ],
+        [
+          "APPLE_2022_10K",
+          34
+        ],
+        [
+          "ORACLE_2022_10K",
+          68
+        ],
+        [
+          "ORACLE_2022_10K",
+          69
+        ]
+      ],
+      "question": "Compare Apple and Oracle asset turnover in 2022.",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        1,
+        2
+      ],
+      "baseline_ranks": [
+        1,
+        2
+      ],
+      "expected": [
+        [
+          "APPLE_2022_10K",
+          32
+        ],
+        [
+          "CVSHEALTH_2022_10K",
+          108
+        ]
+      ],
+      "question": "Compare Apple and CVS Health net income in 2022.",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        2
+      ],
+      "baseline_ranks": [
+        2
+      ],
+      "expected": [
+        [
+          "CVSHEALTH_2022_10K",
+          112
+        ]
+      ],
+      "question": "What depreciation and amortization adjustments reconciled CVS Health net income to operating cash flows in 2022?",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        10
+      ],
+      "baseline_ranks": [
+        10
+      ],
+      "expected": [
+        [
+          "PG_E_2022_10K",
+          103
+        ]
+      ],
+      "question": "How much did PG&E Corporation borrow and repay in cash from financing activities in 2022?",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        18,
+        8
+      ],
+      "baseline_ranks": [
+        null,
+        9
+      ],
+      "expected": [
+        [
+          "COCACOLA_2022_10K",
+          89
+        ],
+        [
+          "CVSHEALTH_2022_10K",
+          149
+        ]
+      ],
+      "question": "Compare Coca-Cola and CVS Health cash payments for operating leases in 2022.",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        2
+      ],
+      "baseline_ranks": [
+        2
+      ],
+      "expected": [
+        [
+          "APPLE_2022_10K",
+          24
+        ]
+      ],
+      "question": "Why did Apple iPad sales fall in 2022?",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "baseline_ranks": [
+        1
+      ],
+      "expected": [
+        [
+          "COCACOLA_2022_10K",
+          49
+        ]
+      ],
+      "question": "Why did Coca-Cola selling, general and administrative expenses rise in 2022?",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        2
+      ],
+      "baseline_ranks": [
+        4
+      ],
+      "expected": [
+        [
+          "CVSHEALTH_2022_10K",
+          76
+        ]
+      ],
+      "question": "Why did CVS Health effective income tax rate increase in 2022?",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        11
+      ],
+      "baseline_ranks": [
+        null
+      ],
+      "expected": [
+        [
+          "BOEING_2022_10K",
+          31
+        ]
+      ],
+      "question": "What caused the change in Boeing commercial airplanes operating loss in 2022?",
+      "split": "development"
+    },
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "expected": [
+        [
+          "BOEING_2022_10K",
+          59
+        ]
+      ],
+      "first_validation_ranks": [
+        1
+      ],
+      "question": "What was BA free cash flow in 2022?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1,
+        2
+      ],
+      "expected": [
+        [
+          "COCACOLA_2022_10K",
+          63
+        ],
+        [
+          "COCACOLA_2022_10K",
+          65
+        ]
+      ],
+      "first_validation_ranks": [
+        1,
+        2
+      ],
+      "question": "What was KO asset turnover in 2022?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1,
+        2
+      ],
+      "expected": [
+        [
+          "COCACOLA_2022_10K",
+          65
+        ],
+        [
+          "ORACLE_2022_10K",
+          68
+        ]
+      ],
+      "first_validation_ranks": [
+        null,
+        null
+      ],
+      "question": "Compare Coca-Cola and Oracle current ratios in 2022.",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1,
+        2
+      ],
+      "expected": [
+        [
+          "APPLE_2022_10K",
+          32
+        ],
+        [
+          "CVSHEALTH_2022_10K",
+          108
+        ]
+      ],
+      "first_validation_ranks": [
+        2,
+        null
+      ],
+      "question": "Compare Apple and CVS Health operating margins in 2022.",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        1
+      ],
+      "expected": [
+        [
+          "APPLE_2022_10K",
+          36
+        ]
+      ],
+      "first_validation_ranks": [
+        1
+      ],
+      "question": "How did Apple cash dividends paid change between 2020 and 2022?",
+      "split": "validation"
+    },
+    {
+      "after_fix_ranks": [
+        8
+      ],
+      "expected": [
+        [
+          "APPLE_2022_10K",
+          24
+        ]
+      ],
+      "first_validation_ranks": [
+        8
+      ],
+      "question": "Why did Apple services sales grow in 2022?",
+      "split": "validation"
+    }
+  ],
+  "checks": {
+    "changed_python_files": "ruff check, ruff format and ty check passed",
+    "repository_prek": "Not clean: 221 pre-existing repository-wide ty diagnostics; formatting changes made by hooks to official evaluation assets were restored."
+  },
+  "conditions": {
+    "candidate_src": "read-only",
+    "citation_checks": "Exact body and original source identity, unique pages, stable repeated query",
+    "corpus_pages": 1150,
+    "cpus": 1,
+    "documents": 6,
+    "limit": 20,
+    "memory_gib": 2,
+    "network": "disabled",
+    "runtime": "Persisted SQLite Runtime, reopened before search; public Memory APIs only"
+  },
+  "frozen_cases_sha256": "908ddb926f073f11b52f6233999f3d7b93cd5c4638a5d19eeb87aa5e7fce8add",
+  "provenance": "Independently authored development questions and physical-page targets read from original PDFs; no official relevance labels, answers, or hidden questions used.",
+  "regression": {
+    "extended_queries": 98,
+    "extended_targets_hit": 122,
+    "extended_targets_total": 122,
+    "previous_probe_queries": 24,
+    "previous_probe_targets_hit": 27,
+    "previous_probe_targets_total": 27,
+    "pytest_passed": 57,
+    "pytest_scope": "Official PDF acceptance, PDF regression tests, official hybrid acceptance and native seekdb hybrid tests",
+    "pytest_seconds": 145.34
+  },
+  "results": {
+    "development_after_fix": [
+      19,
+      19
+    ],
+    "development_baseline": [
+      14,
+      19
+    ],
+    "validation_after_fix": [
+      9,
+      9
+    ],
+    "validation_first_run": [
+      6,
+      9
+    ]
+  },
+  "validation_note": "The six validation questions were run only after the initial fixes. Their first run hit 6 of 9 target pages. They exposed plural financial-metric wording; after fixing that general rule they hit 9 of 9. The recheck is a development result, not blind validation."
+}

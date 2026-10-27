@@ -254,6 +254,8 @@ _NOTE_PATTERNS = tuple((re.compile(pattern), phrases) for pattern, phrases in _N
 
 def _normalize_question(question: str) -> str:
     normalized = re.sub(r"(?<=\w)['\u2019]s\b", "", question.casefold())
+    normalized = re.sub(r"\b(ratio|margin|turnover)s\b", r"\1", normalized)
+    normalized = re.sub(r"\breturns on\b", "return on", normalized)
     normalized = re.sub(r"\bfy\s*(\d{4})\b", r"\1", normalized)
     normalized = re.sub(r"\bp\s*&\s*l\b", "income", normalized)
     normalized = re.sub(r"\bd\s*&\s*a\b", "depreciation and amortization", normalized)
@@ -550,7 +552,18 @@ def _stem(word: str) -> str:
         return "tax"
     if word in {"expense", "expenses", "expensed", "expensing"}:
         return "expense"
-    for root in ("amortiz", "depreciat", "recogniz", "unrecogniz", "compensat", "restructur"):
+    for root in (
+        "amortiz",
+        "depreciat",
+        "recogniz",
+        "unrecogniz",
+        "compensat",
+        "restructur",
+        "increas",
+        "decreas",
+        "reduc",
+        "declin",
+    ):
         if word.startswith(root) and word[len(root) :] in {"e", "ed", "es", "ing", "ation", "ations"}:
             return root
     if len(word) > 5 and word.endswith("ies"):
@@ -603,7 +616,10 @@ def _statement_title_quality(body: str, kind: str) -> int:
         r"(?:\s*\((?:continued|unaudited|audited|loss)\))*$",
         re.MULTILINE,
     )
-    quality = max((4 if "consolidated" in match[0].split() else 2 for match in title.finditer(normalized)), default=0)
+    # Consolidation takes precedence over completeness on a single physical
+    # page: a split consolidated balance sheet must outrank a condensed parent-
+    # only schedule even when the latter contains all three defining line items.
+    quality = max((8 if "consolidated" in match[0].split() else 2 for match in title.finditer(normalized)), default=0)
     if quality:
         # A column label in a footnote can itself say "Consolidated Balance
         # Sheet". The main statement also contains its defining line items.
@@ -684,7 +700,49 @@ def _document_name(hit: MemoryHit) -> str:
     return hit.text.partition("\n")[0].strip()
 
 
-def _target_documents(documents: frozenset[str], question: str) -> frozenset[str]:
+def _company_name(document: str) -> str:
+    return "".join(
+        part
+        for part in re.findall(r"[a-z0-9]+", document.casefold())
+        if part not in _DOCUMENT_GENERIC_WORDS
+        and not re.fullmatch(r"(?:19|20)\d{2}", part)
+        and part not in {"10k", "10q", "8k", "20f"}
+    )
+
+
+def _common_stock_symbol(body: str) -> str | None:
+    """Read an issuer's equity symbol from its own registered-securities table.
+
+    Require the table heading and a common-stock row followed by an exchange.
+    Arbitrary uppercase prose and debt security symbols are not issuer aliases.
+    Wrapped columns may put the symbol on a separate line before the exchange.
+    """
+
+    section = re.search(r"securities registered\s+(?:pursuant to|under)\s+section\s+12\s*\(b\)", body, re.I)
+    if section is None:
+        return None
+    table = re.split(r"section\s+12\s*\(g\)", body[section.end() :], maxsplit=1, flags=re.I)[0]
+    if not re.search(r"trading\s+symbol", table, re.I):
+        return None
+    stock = re.search(r"\b(?:common|ordinary)\s+(?:stock|shares)\b", table, re.I)
+    if stock is None:
+        return None
+    row = table[stock.end() : stock.end() + 600]
+    exchange = re.search(
+        r"(?:The\s+)?(?:New York Stock Exchange|Nasdaq(?:\s+(?:Global|Select|Capital))*"
+        r"\s+(?:Stock Market|Market)|NYSE(?:\s+American)?)\b",
+        row,
+        re.I,
+    )
+    if exchange is None:
+        return None
+    symbol = re.search(r"\b([A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)?)\s*(?:[\u2014\u2013-]\s*)?$", row[: exchange.start()])
+    return symbol[1] if symbol else None
+
+
+def _target_documents(
+    documents: frozenset[str], question: str, symbols: dict[str, str] | None = None
+) -> frozenset[str]:
     """Restrict only explicit complete entities, retaining comparison subjects.
 
     A company may span adjacent words (or contain digits). A substring within
@@ -695,17 +753,18 @@ def _target_documents(documents: frozenset[str], question: str) -> frozenset[str
     tokens = re.findall(r"[a-z0-9]+", normalized)
     mentions = {"".join(tokens[start:end]) for start in range(len(tokens)) for end in range(start + 1, len(tokens) + 1)}
     years = set(re.findall(r"\b(?:19|20)\d{2}\b", normalized))
+    # Preserve case here: an ordinary word such as "it" is not the ticker IT.
+    symbol_mentions = set(
+        re.findall(r"(?<![\w.-])\$?([A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)?)(?!\w|[.-][A-Za-z0-9])", question)
+    )
+    symbol_companies: set[str] = set()
+    companies = {name: _company_name(name) for name in documents}
+    for name, symbol in (symbols or {}).items():
+        if symbol in symbol_mentions:
+            symbol_companies.add(companies[name])
     matched: dict[str, list[str]] = {}
-    for name in documents:
-        company_parts = [
-            part
-            for part in re.findall(r"[a-z0-9]+", name.casefold())
-            if part not in _DOCUMENT_GENERIC_WORDS
-            and not re.fullmatch(r"(?:19|20)\d{2}", part)
-            and part not in {"10k", "10q", "8k", "20f"}
-        ]
-        company = "".join(company_parts)
-        if len(company) >= 2 and company in mentions:
+    for name, company in companies.items():
+        if len(company) >= 2 and (company in mentions or company in symbol_companies):
             matched.setdefault(company, []).append(name)
     selected: set[str] = set()
     for names in matched.values():
@@ -731,17 +790,27 @@ async def _recall_documents(memory: Any, documents: frozenset[str], candidate_li
     return hits
 
 
-async def _pdf_inventory(memory: Any) -> tuple[dict[tuple[str, str, str], str], int]:
+async def _pdf_inventory(memory: Any) -> tuple[dict[tuple[str, str, str], str], int, dict[str, str]]:
     # Listing bounds the pool and identifies PDF entries. Candidate citations
     # still come exclusively from public Memory.search results.
     stored = await memory.list()
-    return {
-        (row.memory_ref.artifact_id, row.entry.entry_id, row.entry.entry_version_id): row.entry.text.partition("\n")[
-            0
-        ].strip()
-        for row in stored.entries
-        if any(ref.source_type == "pdf-page" for ref in row.entry.sources)
-    }, len(stored.entries)
+    inventory: dict[tuple[str, str, str], str] = {}
+    symbols: dict[str, set[str]] = {}
+    for row in stored.entries:
+        if not any(ref.source_type == "pdf-page" for ref in row.entry.sources):
+            continue
+        document, _, body = row.entry.text.partition("\n")
+        document = document.strip()
+        inventory[(row.memory_ref.artifact_id, row.entry.entry_id, row.entry.entry_version_id)] = document
+        symbol = _common_stock_symbol(body)
+        if symbol:
+            symbols.setdefault(document, set()).add(symbol)
+    # Conflicting disclosures must not turn ingestion order into entity selection.
+    return (
+        inventory,
+        len(stored.entries),
+        {doc: next(iter(values)) for doc, values in symbols.items() if len(values) == 1},
+    )
 
 
 def _lexical_score(counts: Counter[str], weights: dict[str, float], idf: dict[str, float], average: float) -> float:
@@ -753,7 +822,7 @@ def _lexical_score(counts: Counter[str], weights: dict[str, float], idf: dict[st
     )
 
 
-def _defined_abbreviations(body: str) -> list[tuple[str, frozenset[str]]]:
+def _defined_abbreviations(body: str, issuer: str = "") -> list[tuple[str, frozenset[str]]]:
     """Read long-form (ACRONYM) definitions from the retrieved document itself."""
 
     definitions = []
@@ -761,21 +830,27 @@ def _defined_abbreviations(body: str) -> list[tuple[str, frozenset[str]]]:
         short = match[1].casefold()
         preceding = re.findall(r"[a-z]+", body[max(0, match.start() - 160) : match.start()].casefold())
         long = " ".join(preceding[-min(len(short) * 2, len(short) + 5) :])
-        position = len(long) - 1
-        # Align backwards, permitting internal letters (Asia-Pacific -> APAC),
-        # but requiring the first letter to start a word in the long form.
-        for index in range(len(short) - 1, -1, -1):
-            while position >= 0 and (
-                long[position] != short[index] or (index == 0 and position > 0 and long[position - 1].isalpha())
-            ):
+        variants = [short]
+        # Segment names can omit the issuer while their abbreviation retains
+        # its initial: Briar Heavy Vehicles can appear as Heavy Vehicles (BHV).
+        if len(short) >= 3 and issuer and short.startswith(issuer[0]):
+            variants.append(short[1:])
+        for variant in variants:
+            position = len(long) - 1
+            # Align backwards, permitting internal letters (Asia-Pacific -> APAC),
+            # but requiring the first letter to start a word in the long form.
+            for index in range(len(variant) - 1, -1, -1):
+                while position >= 0 and (
+                    long[position] != variant[index] or (index == 0 and position > 0 and long[position - 1].isalpha())
+                ):
+                    position -= 1
+                if position < 0:
+                    break
                 position -= 1
-            if position < 0:
-                break
-            position -= 1
-        else:
-            terms = frozenset(_stem(word) for word in long[position + 1 :].split() if word not in _STOPWORDS)
-            if len(terms) > 1:
-                definitions.append((short, terms))
+            else:
+                terms = frozenset(_stem(word) for word in long[position + 1 :].split() if word not in _STOPWORDS)
+                if len(terms) > 1:
+                    definitions.append((short, terms))
     return definitions
 
 
@@ -783,7 +858,9 @@ def _expand_document_terms(hits: list[MemoryHit], question: str, weights: dict[s
     weights = dict(weights)
     question_terms = {_stem(word) for word in _WORDS.findall(_normalize_question(question)) if word not in _STOPWORDS}
     for hit in hits:
-        for abbreviation, expansion in _defined_abbreviations(hit.text.partition("\n")[2]):
+        for abbreviation, expansion in _defined_abbreviations(
+            hit.text.partition("\n")[2], _company_name(_document_name(hit))
+        ):
             if expansion <= question_terms:
                 weights[abbreviation] = max(weights.get(abbreviation, 0.0), 1.0)
             elif abbreviation in question_terms:
@@ -832,6 +909,66 @@ def _diverse_pages(scores: list[tuple[float, MemoryHit]], anchors: list[MemoryHi
     return [scores[index][1] for index in chosen] + [scores[index][1] for index in sorted(remaining)]
 
 
+def _statement_anchors(
+    ranked: list[MemoryHit],
+    titles: dict[tuple[str, str, str], dict[str, int]],
+    question: str,
+    targets: frozenset[str],
+) -> list[MemoryHit]:
+    statement_kinds = _primary_statement_kinds(question)
+    anchors: list[MemoryHit] = []
+    # A compound question needs complementary pages. One high-frequency aspect
+    # must not consume the whole result budget and crowd out another statement.
+    # Only explicit comparison subjects get separate reservations. A question
+    # without a named subject must not fill its budget with every stored report.
+    groups = [[hit for hit in ranked if _document_name(hit) == doc] for doc in sorted(targets)] if targets else [ranked]
+    for kind in statement_kinds:
+        for group in groups:
+            if not group:
+                continue
+            quality = max(
+                titles[(hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)][kind] for hit in group
+            )
+            if quality:
+                best = next(
+                    hit
+                    for hit in group
+                    if titles[(hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)][kind] == quality
+                )
+                if best not in anchors:
+                    anchors.append(best)
+                if kind == "balance":
+                    operands = {
+                        phrase
+                        for pattern, vocabulary, kinds in _METRIC_PATTERNS
+                        if kind in kinds and pattern.search(_normalize_question(question))
+                        for phrase in vocabulary
+                    }
+                    for operand in sorted(operands):
+                        operand_words = " ".join(_stem(word) for word in _WORDS.findall(operand))
+                        supporting = [
+                            hit
+                            for hit in group
+                            if titles[(hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)][kind]
+                            and f" {operand_words} "
+                            in " "
+                            + " ".join(_stem(word) for word in _WORDS.findall(hit.text.partition("\n")[2].casefold()))
+                            + " "
+                        ]
+                        if not supporting or any(hit in anchors for hit in supporting):
+                            continue
+                        # A split balance sheet must retain both operands, even
+                        # when the assets and liabilities pages have the same title.
+                        complement = max(
+                            supporting,
+                            key=lambda hit: titles[(hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)][
+                                kind
+                            ],
+                        )
+                        anchors.append(complement)
+    return anchors
+
+
 def _rank_pages(
     hits: list[MemoryHit],
     question: str,
@@ -839,10 +976,23 @@ def _rank_pages(
     phrases: tuple[str, ...],
     votes: dict[tuple[str, str, str], float],
     limit: int = 20,
+    targets: frozenset[str] = frozenset(),
 ) -> list[MemoryHit]:
     if not hits:
         return []
     weights = _expand_document_terms(hits, question, weights)
+    # The selected company identifies the report, not its evidence page. Keeping
+    # its name in BM25 can favor covers and boilerplate over a lease/segment note.
+    query_tokens = re.findall(r"[a-z0-9]+", _normalize_question(question))
+    companies = {_company_name(document) for document in targets}
+    subject_terms = {
+        _stem(word)
+        for start in range(len(query_tokens))
+        for end in range(start + 1, len(query_tokens) + 1)
+        if "".join(query_tokens[start:end]) in companies
+        for word in query_tokens[start:end]
+    }
+    weights = {term: weight for term, weight in weights.items() if term not in subject_terms} or weights
     tokens = [[_stem(word) for word in _WORDS.findall(hit.text.partition("\n")[2].casefold())] for hit in hits]
     terms = [Counter(words) for words in tokens]
     frequency = Counter(term for counts in terms for term in counts)
@@ -873,38 +1023,32 @@ def _rank_pages(
         phrase_score = sum(0.8 for phrase in phrases if phrase in compact_body)
         identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
         titles[identity] = {kind: _statement_title_quality(body, kind) for kind in statement_kinds}
+        for kind, quality in titles[identity].items():
+            heading = _STATEMENT_HEADINGS[kind].search(body.casefold())
+            subject = "\n".join(body[: heading.start()].splitlines()[-4:]) if heading else ""
+            if quality and _target_documents(frozenset({document}), subject):
+                # Distinguish a parent's statement from its subsidiary's statement
+                # in a combined report, before lexical repetition breaks the tie.
+                titles[identity][kind] += 4
         # Main statements have a small reserved set below. Giving every table
         # title a bonus would crowd out equally valid narrative/notes evidence.
         score = (score + phrase_score) * (1.0 + 0.5 * entity_overlap) + 4.0 * votes.get(identity, 0.0)
         scores.append((score, hit))
     scores.sort(key=lambda item: (-item[0], item[1].memory_ref.artifact_id, item[1].entry_id))
-    ranked = [hit for _, hit in scores]
-    anchors: list[MemoryHit] = []
-    # A compound question needs complementary pages. One high-frequency aspect
-    # must not consume the whole result budget and crowd out another statement.
-    for kind in statement_kinds:
-        quality = max((value[kind] for value in titles.values()), default=0)
-        if quality:
-            best = next(
-                hit
-                for hit in ranked
-                if titles[(hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)][kind] == quality
-            )
-            if best not in anchors:
-                anchors.append(best)
+    anchors = _statement_anchors([hit for _, hit in scores], titles, question, targets)
     return _diverse_pages(scores, anchors, limit)
 
 
 async def _page_candidates(
     memory: Any, question: str, searches: tuple[str, ...], limit: int
-) -> tuple[list[MemoryHit], dict[tuple[str, str, str], float]]:
+) -> tuple[list[MemoryHit], dict[tuple[str, str, str], float], frozenset[str]]:
     """Recall an eligible PDF pool using indexed, current-scope Memory searches."""
 
-    inventory, total_entries = await _pdf_inventory(memory)
+    inventory, total_entries, symbols = await _pdf_inventory(memory)
     if not inventory:
-        return [], {}
+        return [], {}, frozenset()
     documents = frozenset(inventory.values())
-    targets = _target_documents(documents, question)
+    targets = _target_documents(documents, question, symbols)
     selected_documents = targets or documents
     eligible = {identity for identity, document in inventory.items() if document in selected_documents}
     candidates: dict[tuple[str, str, str], MemoryHit] = {}
@@ -924,7 +1068,7 @@ async def _page_candidates(
             if identity in eligible:
                 candidates[identity] = hit
                 votes[identity] = votes.get(identity, 0.0) + 1.0 / (60 + rank)
-    return list(candidates.values()), votes
+    return list(candidates.values()), votes, targets
 
 
 async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple[MemoryCitation, ...]:
@@ -935,10 +1079,10 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
     if type(limit) is not int or limit < 1:
         raise ValueError("limit must be a positive integer")  # noqa: TRY003
     searches, weights, phrases = _query_plan(question)
-    candidates, votes = await _page_candidates(memory, question, searches, limit)
+    candidates, votes, targets = await _page_candidates(memory, question, searches, limit)
     citations: list[MemoryCitation] = []
     seen: set[tuple[str, str]] = set()
-    for hit in _rank_pages(candidates, question, weights, phrases, votes, limit):
+    for hit in _rank_pages(candidates, question, weights, phrases, votes, limit, targets):
         citation = MemoryCitation(
             memory_ref=hit.memory_ref, entry_id=hit.entry_id, entry_version_id=hit.entry_version_id
         )

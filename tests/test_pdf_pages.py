@@ -509,6 +509,117 @@ def test_target_company_pages_are_not_displaced_by_another_reports_keyword_densi
     asyncio.run(run())
 
 
+def test_company_symbols_and_comparison_operands_survive_restart(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'symbols.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        pages = (
+            (
+                "RIVERTON_2030_10K",
+                "Securities registered pursuant to Section 12(b) of the Act:\n"
+                "Title of each class Trading Symbol(s) Name of each exchange on which registered\n"
+                "Common Stock, $0.01 par value per share RVT The Nasdaq Stock Market LLC\n"
+                "Securities registered pursuant to Section 12(g) of the Act: None",
+            ),
+            ("RIVERTON_2030_10K", "Consolidated Statements of Income\nNet sales 900. Net earnings 150."),
+            (
+                "RIVERTON_2030_10K",
+                "Riverton\nConsolidated Balance Sheets\nCurrent assets 300. Total assets 750.",
+            ),
+            (
+                "MERIDIAN_2030_10K",
+                "Securities registered pursuant to Section 12(b) of the Act:\n"
+                "Title of each class Trading Symbol(s) Name of each exchange on which registered\n"
+                "Common Stock, no par value\n3.125% senior notes\nMDN\n\u2014\nNew York Stock Exchange\n"
+                "New York Stock Exchange\nSecurities registered pursuant to Section 12(g): None",
+            ),
+            (
+                "MERIDIAN_2030_10K",
+                "Consolidated Statements of Income\nNet sales 200. Operating income 50. Net earnings 30.",
+            ),
+            (
+                "MERIDIAN_2030_10K",
+                "Consolidated Balance Sheets\nTotal assets 150. Total liabilities 80. Stockholders equity 70.",
+            ),
+            (
+                "RIVERTON_2029_10K",
+                "Consolidated Statements of Income\nNet sales 800. Operating income 160. Net earnings 130.",
+            ),
+            ("RIVERTON_2029_10K", "Consolidated Balance Sheets\nTotal assets 700. Total liabilities 400."),
+            (
+                "RIVERTON_2030_10K",
+                "Riverton\nConsolidated Balance Sheets\nCurrent liabilities 200. Total liabilities 400.",
+            ),
+            (
+                "RIVERTON_2030_10K",
+                "Riverton\nCondensed Balance Sheets\nCurrent assets 20. Current liabilities 10. "
+                "Total assets 40. Total liabilities 15. Stockholders equity 25.",
+            ),
+            (
+                "RIVERTON_2030_10K",
+                "Subsidiary Utilities\nConsolidated Balance Sheets\nCurrent assets 250. Current liabilities 180. "
+                "Total assets 600. Total liabilities 350. Stockholders equity 250.",
+            ),
+            ("RIVERTON_2030_10K", "Our reportable segment is Retail Services (RRS)."),
+            (
+                "RIVERTON_2030_10K",
+                "RRS operating loss decreased due to higher deliveries and lower production costs.",
+            ),
+            *(
+                (
+                    "UNRELATED_2030_10K",
+                    f"Segment {n} operating review. Return on assets, net income, total assets and earnings. " * 5,
+                )
+                for n in range(24)
+            ),
+        )
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Symbols", summary="Reports", idempotency_key="symbols")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, (document, body) in enumerate(pages, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id=document, document_sha256="d" * 64, page_number=number, text=body)
+                )
+                locations[source.name] = number
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            for question, expected in (
+                ("What was RVT return on assets in 2030?", {2, 3}),
+                ("What was $MDN return on assets in 2030?", {5, 6}),
+                ("Compare Riverton and Meridian return on assets in 2030.", {2, 3, 5, 6}),
+                ("Compare Riverton and Meridian returns on assets in 2030.", {2, 3, 5, 6}),
+                ("Compare Riverton and Meridian operating margins in 2030.", {2, 5}),
+                ("Compare RVT and Meridian return on assets in 2030.", {2, 3, 5, 6}),
+                ("Compare Riverton return on assets in 2029 and 2030.", {2, 3, 7, 8}),
+                ("What was Riverton working capital in 2030?", {3, 9}),
+                ("Compare Riverton current ratios in 2030.", {3, 9}),
+                ("Why did Riverton Retail Services operating loss decrease in 2030?", {13}),
+            ):
+                citations = await search_pdf_pages(memory, question, len(expected))
+                returned = set()
+                for citation in citations:
+                    entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                    number = locations[entry.sources[0].source_id]
+                    assert entry.text == f"{pages[number - 1][0]}\n{pages[number - 1][1]}"
+                    returned.add(number)
+                assert returned == expected, question
+                assert await search_pdf_pages(memory, question, len(expected)) == citations
+
+    asyncio.run(run())
+
+
 def test_compound_question_recalls_each_statement_among_many_subsidiary_tables(tmp_path: Path) -> None:
     async def run() -> None:
         config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'statements.db'}"))
