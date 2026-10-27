@@ -334,6 +334,47 @@ def test_inherited_resources_and_form_content_keep_full_text() -> None:
     ]
 
 
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_content_arrays_share_text_state_and_preserve_rotated_pages(rotation: int) -> None:
+    writer = PdfWriter(clone_from=io.BytesIO(_document()))
+    first = writer.pages[0]
+    streams = []
+    for content in (
+        b"q BT /F1 12 Tf 20 500 Td",
+        b"(Revenue 1,234.50 and operating income 42.) Tj",
+        b"ET Q",
+    ):
+        stream = DecodedStreamObject()
+        stream.set_data(content)
+        streams.append(writer._add_object(stream.flate_encode()))
+    first[NameObject("/Contents")] = ArrayObject(streams)
+    first[NameObject("/Rotate")] = NumberObject(rotation)
+    output = io.BytesIO()
+    writer.write(output)
+    raw = output.getvalue()
+    pages = parse_pdf_document(PDFDocumentInput(document_id="stream-array", content=raw))
+    assert [page.text.strip() for page in pages] == [
+        "Revenue 1,234.50 and operating income 42.",
+        "",
+        "Cash flows 987 and depreciation 10.",
+    ]
+    assert {page.document_sha256 for page in pages} == {sha256(raw).hexdigest()}
+    assert [page.page_number for page in pages] == [1, 2, 3]
+
+
+def test_form_font_and_property_names_remain_local_to_each_resource_dictionary() -> None:
+    writer = PdfWriter()
+    for actual in ("ti", "tu"):
+        writer.append(io.BytesIO(_marked_glyph_document((actual,), named=True, form=True)))
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="separate-resources", content=output.getvalue()))
+    assert "operations 1234.50 offerings" in pages[0].text
+    assert "operatuons 1234.50 offerings" in pages[2].text
+    assert pages[1].text == pages[3].text == ""
+    assert [page.page_number for page in pages] == [1, 2, 3, 4]
+
+
 @pytest.mark.parametrize("chained", [False, True])
 @pytest.mark.parametrize("data", [b"not a zlib stream", zlib.compress(b"BT (partial text) Tj ET")[:-4], b""])
 def test_corrupt_late_compressed_page_fails_atomically(data: bytes, *, chained: bool) -> None:
@@ -856,5 +897,106 @@ def test_repeated_tables_do_not_displace_distinct_narrative_evidence(tmp_path: P
             # Similar pages are deferred, not deleted: a larger budget can
             # still retrieve each distinct physical page.
             assert len(await search_pdf_pages(memory, question, 40)) == 27
+
+    asyncio.run(run())
+
+
+def test_comparative_year_tables_retain_distinct_evidence(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'years.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        bodies = (
+            "Receivable aging at December 31, 2030. Current accounts 100. Past due accounts 30. "
+            "Past due balances are separated into aging categories for customer credit risk management.",
+            "Receivable aging at December 31, 2029. Current accounts 120. Past due accounts 20. "
+            "Past due balances are separated into aging categories for customer credit risk management.",
+            *(
+                f"Risk disclosure {n}. Receivable aging and past due balances inform "
+                "customer credit assessments. Collection efforts consider economic conditions, "
+                "payment history, collateral valuation and guarantees."
+                for n in range(24)
+            ),
+        )
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(ScopeDraft(title="Years", summary="Tables", idempotency_key="years"))
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, body in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(
+                        document_id="RIVERTON_2030_10K", document_sha256="e" * 64, page_number=number, text=body
+                    )
+                )
+                locations[source.name] = number
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            for limit in (2, 20):
+                citations = await search_pdf_pages(
+                    memory, "Compare Riverton receivable aging and past due balances in 2029 and 2030.", limit
+                )
+                returned = []
+                for citation in citations:
+                    entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                    number = locations[entry.sources[0].source_id]
+                    assert entry.text == f"RIVERTON_2030_10K\n{bodies[number - 1]}"
+                    returned.append(number)
+                assert len(returned) == len(set(returned)) == limit
+                assert {1, 2} <= set(returned)
+
+    asyncio.run(run())
+
+
+def test_balance_sheet_continuation_without_repeated_title(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'continuation.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        bodies = (
+            "Riverton\nConsolidated Balance Sheets\nCurrent assets 300\nTotal assets 900",
+            "Riverton\nAccounts payable 80\nCurrent liabilities 200\nLong-term debt 400\n"
+            "Total liabilities 600\nStockholders equity 300",
+            "Working capital management\n"
+            + ("Working capital reflects current assets and current liabilities. " * 12).rstrip(),
+        )
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Continuation", summary="Tables", idempotency_key="continuation")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, body in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(
+                        document_id="RIVERTON_2030_10K", document_sha256="f" * 64, page_number=number, text=body
+                    )
+                )
+                locations[source.name] = number
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            citations = await search_pdf_pages(memory, "What was Riverton working capital in 2030?", 2)
+            returned = set()
+            for citation in citations:
+                entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                number = locations[entry.sources[0].source_id]
+                assert entry.text == f"RIVERTON_2030_10K\n{bodies[number - 1]}"
+                returned.add(number)
+            assert returned == {1, 2}
 
     asyncio.run(run())

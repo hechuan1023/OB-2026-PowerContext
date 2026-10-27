@@ -869,7 +869,9 @@ def _expand_document_terms(hits: list[MemoryHit], question: str, weights: dict[s
     return weights
 
 
-def _diverse_pages(scores: list[tuple[float, MemoryHit]], anchors: list[MemoryHit], limit: int) -> list[MemoryHit]:
+def _diverse_pages(
+    scores: list[tuple[float, MemoryHit]], anchors: list[MemoryHit], limit: int, question: str
+) -> list[MemoryHit]:
     """Reduce redundant pages in the result budget without dropping identities.
 
     Similar subsidiary tables or repeated contract language can otherwise fill
@@ -886,14 +888,21 @@ def _diverse_pages(scores: list[tuple[float, MemoryHit]], anchors: list[MemoryHi
         for _, hit in scores
     ]
     documents = [_document_name(hit) for _, hit in scores]
+    requested_years = frozenset(re.findall(r"\b(?:19|20)\d{2}\b", question))
+    years = [
+        requested_years.intersection(re.findall(r"\b(?:19|20)\d{2}\b", hit.text.partition("\n")[2]))
+        for _, hit in scores
+    ]
     chosen = [index for index, (_, hit) in enumerate(scores) if hit in anchors]
     # Preserve the order of complementary statement anchors.
     chosen.sort(key=lambda index: anchors.index(scores[index][1]))
     remaining = set(range(len(scores))) - set(chosen)
     redundancy = [0.0] * len(scores)
     pending = list(chosen)
+    covered: dict[str, set[str]] = {}
     while remaining and len(chosen) < limit:
         for selected in pending:
+            covered.setdefault(documents[selected], set()).update(years[selected])
             for index in remaining:
                 if documents[index] == documents[selected]:
                     union = features[index] | features[selected]
@@ -902,11 +911,54 @@ def _diverse_pages(scores: list[tuple[float, MemoryHit]], anchors: list[MemoryHi
                     # Penalize only near-duplicate vocabulary, not topic overlap.
                     overlap = max(0.0, (similarity - 0.6) / 0.4)
                     redundancy[index] = max(redundancy[index], overlap)
-        best = max(remaining, key=lambda index: (scores[index][0] * (1.0 - 0.7 * redundancy[index]), -index))
+        # Equal vocabulary is not redundant when it supplies a requested year
+        # absent from this document's selected pages. Do not treat every numeric
+        # difference as novelty: that would reinstate repetitive subsidiary tables.
+        penalties = {
+            index: 0.0
+            if len(requested_years) > 1 and years[index] - covered.get(documents[index], set())
+            else redundancy[index]
+            for index in remaining
+        }
+        best = max(remaining, key=lambda index: (scores[index][0] * (1.0 - 0.7 * penalties[index]), -index))
         chosen.append(best)
         remaining.remove(best)
         pending = [best]
     return [scores[index][1] for index in chosen] + [scores[index][1] for index in sorted(remaining)]
+
+
+def _balance_supporting_pages(
+    group: list[MemoryHit], operand: str, titles: dict[tuple[str, str, str], dict[str, int]]
+) -> list[MemoryHit]:
+    operand_words = " ".join(_stem(word) for word in _WORDS.findall(operand))
+    titled = [
+        hit
+        for hit in group
+        if titles[(hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)]["balance"]
+        and f" {operand_words} "
+        in " " + " ".join(_stem(word) for word in _WORDS.findall(hit.text.partition("\n")[2].casefold())) + " "
+    ]
+    if titled:
+        return titled
+    # A continuation need not repeat the statement title. Require several
+    # distinct balance-sheet labels followed by amounts, including the missing
+    # operand; a paragraph merely discussing working capital is not a table.
+    row_pattern = re.compile(
+        r"^\s*((?:total\s+)?(?:(?:(?:current|noncurrent)\s+)?(?:assets|liabilities)|"
+        r"accounts\s+(?:payable|receivable)|cash(?:\s+and\s+cash\s+equivalents)?|"
+        r"inventor(?:y|ies)|(?:long|short)[ -]term\s+debt|(?:shareholders|stockholders)\s+equity))"
+        r"[ \t]+\(?\$?[ \t]*[-\d]",
+        re.I | re.M,
+    )
+    supporting = []
+    for hit in group:
+        labels = {
+            " ".join(_stem(word) for word in _WORDS.findall(label.casefold()))
+            for label in row_pattern.findall(hit.text.partition("\n")[2])
+        }
+        if len(labels) >= 3 and any(f" {operand_words} " in f" {label} " for label in labels):
+            supporting.append(hit)
+    return supporting
 
 
 def _statement_anchors(
@@ -945,16 +997,7 @@ def _statement_anchors(
                         for phrase in vocabulary
                     }
                     for operand in sorted(operands):
-                        operand_words = " ".join(_stem(word) for word in _WORDS.findall(operand))
-                        supporting = [
-                            hit
-                            for hit in group
-                            if titles[(hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)][kind]
-                            and f" {operand_words} "
-                            in " "
-                            + " ".join(_stem(word) for word in _WORDS.findall(hit.text.partition("\n")[2].casefold()))
-                            + " "
-                        ]
+                        supporting = _balance_supporting_pages(group, operand, titles)
                         if not supporting or any(hit in anchors for hit in supporting):
                             continue
                         # A split balance sheet must retain both operands, even
@@ -1036,7 +1079,7 @@ def _rank_pages(
         scores.append((score, hit))
     scores.sort(key=lambda item: (-item[0], item[1].memory_ref.artifact_id, item[1].entry_id))
     anchors = _statement_anchors([hit for _, hit in scores], titles, question, targets)
-    return _diverse_pages(scores, anchors, limit)
+    return _diverse_pages(scores, anchors, limit, question)
 
 
 async def _page_candidates(

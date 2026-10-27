@@ -1,0 +1,68 @@
+{
+  "baseline_commit": "6dbb206417b6529302b6e60e47e43d98d58f0a5b",
+  "checks": {
+    "changed_python_files": "ruff and ty passed",
+    "whole_repository": "prek reports 221 existing ty diagnostics; changes to public evaluation files made by formatting hooks were restored"
+  },
+  "limitations": [
+    "The two targeted failures were demonstrated with a small return limit of 2; they do not establish the cause of a hidden Recall@20 failure.",
+    "Official evidence-text and full-page gold are unavailable; official parsing thresholds and exact annotated-page recall remain unverified.",
+    "Untitled continuation recovery is conservative and requires multiple numeric balance-sheet rows."
+  ],
+  "parser_boundary_tests": {
+    "content_array_text_state_rotation_degrees": [
+      0,
+      90,
+      180,
+      270
+    ],
+    "independent_form_font_and_property_names": true,
+    "parser_implementation_changed": false
+  },
+  "pytest": {
+    "passed": 64,
+    "scope": "Official PDF acceptance, PDF regressions, official hybrid acceptance and native seekdb hybrid tests",
+    "seconds": 180.63
+  },
+  "regressions": [
+    {
+      "baseline_physical_pages": [
+        2,
+        14
+      ],
+      "candidate_passed": true,
+      "case": "Comparative receivable-aging tables with equal words and different years",
+      "limit": 2,
+      "required_physical_pages": [
+        1,
+        2
+      ]
+    },
+    {
+      "baseline_physical_pages": [
+        1,
+        3
+      ],
+      "candidate_passed": true,
+      "case": "Balance-sheet liabilities continuation without a repeated title",
+      "limit": 2,
+      "required_physical_pages": [
+        1,
+        2
+      ]
+    }
+  ],
+  "retrieval_regression": {
+    "combined_queries": 140,
+    "combined_target_pages_hit": 177,
+    "combined_target_pages_total": 177,
+    "extended_queries": 98,
+    "extended_target_pages_hit": 122,
+    "extended_target_pages_total": 122,
+    "physical_page_checks": "All returned citations read through Memory.get; exact body and source identity checked, distinct pages, stable repeat",
+    "provenance": "Existing independently authored questions and targets; not official gold or new blind validation",
+    "queries": 42,
+    "target_pages_hit": 55,
+    "target_pages_total": 55
+  }
+}
