@@ -253,8 +253,20 @@ _NOTE_CONCEPTS = (
         ("redeemable interest", "redemption value", "put option"),
     ),
     (
-        r"\b(?:accruals?|provisions?|amounts? set aside)\b",
+        r"\b(?:accruals?|provisions?|(?:amounts?|money|funds) set aside)\b",
         ("accrual", "liability", "provision", "reserve"),
+    ),
+    (
+        r"\b(?:medical bills|health ?care (?:costs|claims)|medical claims)\b",
+        ("health care costs", "claims"),
+    ),
+    (
+        r"\b(?:earlier|previous|prior) (?:years?|periods?)\b",
+        ("prior years", "prior periods"),
+    ),
+    (
+        r"\b(?:bank backstop|(?:backup|standby|back up) (?:bank )?(?:credit|funding|liquidity))\b",
+        ("credit facility", "line of credit", "revolving credit"),
     ),
     (
         r"\b(?:tax losses|loss carryforwards?|loss(?:es)?(?=.{0,120}\b(?:future taxes|taxable income)\b))\b",
@@ -274,7 +286,7 @@ _NOTE_CONCEPTS = (
     ),
     (r"\b(?:geograph\w*|territories|regions)\b", ("geographic", "reportable segments", "countries", "operations")),
     (
-        r"\b(?:repay(?:s|ing|ment|ments)?|repaid|lenders?)\b",
+        r"\b(?:repay(?:s|ing|ment|ments)?|repaid|lenders?|(?:pay|paid|paying) back)\b",
         ("debt repayments", "payments of debt", "borrowings", "financing activities"),
     ),
     (

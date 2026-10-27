@@ -1007,6 +1007,10 @@ def test_financial_note_paraphrases_retrieve_accounting_terms_after_restart(tmp_
             "We hold supplier conferences and plan to buy and sell products in future years.",
             "Cash and debt financing. Spending may increase future profits. The company has foreign operations "
             "and pays taxes on income. Business plans may result in losses in some markets.",
+            "Health care costs payable for prior years decreased by 60. Claims were settled below original estimates. "
+            "This development did not increase operating results because current-period costs offset the revision.",
+            "Short-term borrowings include the current portion of long-term debt, principal 250. "
+            "A committed revolving credit facility provides liquidity of 7000.",
         )
         source_ids = {}
         async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
@@ -1034,6 +1038,16 @@ def test_financial_note_paraphrases_retrieve_accounting_terms_after_restart(tmp_
                 ("What was the value of the minority holding that Briar could be forced to buy back?", 2),
                 ("Which overseas losses can Briar use against future taxes without a deadline?", 3),
                 ("How much of the amount set aside by Briar was still unpaid at year end?", 4),
+                (
+                    "How much money set aside for earlier years medical bills did Briar no longer need, "
+                    "and did releasing it boost profit?",
+                    7,
+                ),
+                (
+                    "How much of Briar longer-term loans had to be paid back soon, "
+                    "and what committed bank backstop was available?",
+                    8,
+                ),
             ):
                 citations = await search_pdf_pages(memory, question, limit=1)
                 assert len(citations) == 1
