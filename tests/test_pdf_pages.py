@@ -17,6 +17,7 @@
 import asyncio
 import base64
 import io
+import unicodedata
 import zlib
 from hashlib import sha256
 from pathlib import Path
@@ -40,7 +41,9 @@ from powercontext.builtin.persistence.sqlite import SQLiteConfig
 from powercontext.builtin.runtime import (
     BuiltinConfig,
     GetMemoryEntryRequest,
+    RememberMemoryRequest,
     SubmitSourceObservation,
+    open_builtin_contexts,
     open_builtin_runtime,
 )
 from powercontext.builtin.scope import ScopeDraft
@@ -1091,7 +1094,68 @@ def test_financial_note_paraphrases_retrieve_accounting_terms_after_restart(tmp_
     asyncio.run(run())
 
 
-def test_opaque_document_ids_use_registered_issuers_after_restart(tmp_path: Path) -> None:
+@pytest.mark.parametrize("field", ["document_id", "text", "legacy"])
+def test_pdf_quotes_preserve_source_unicode_after_restart_and_organize(tmp_path: Path, field: str) -> None:
+    async def run() -> None:
+        raw = _marked_glyph_document(("e\u0301",)) if field == "text" else _document()
+        document = "Unicode-glyphs" if field == "text" else "Re\u0301port"
+        question = "offerings" if field == "text" else "Revenue operating income"
+        pages = parse_pdf_document(PDFDocumentInput(document_id=document, content=raw))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        observations = tuple([project_source_for_transport(registry, await registry.resolve(page)) for page in pages])
+        expected = TextEvidence.model_validate(observations[0].projection(TEXT_EVIDENCE_PROJECTION_KEY)).content.strip()
+        assert expected != unicodedata.normalize("NFC", expected)
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'unicode.db'}"))
+
+        class LegacyPipeline(_PagePipeline):
+            async def extract(self, request, /) -> tuple[MemoryEntryInput, ...]:
+                return tuple(
+                    entry.model_copy(update={"text": unicodedata.normalize("NFC", entry.text)})
+                    for entry in await super().extract(request)
+                )
+
+        pipeline = LegacyPipeline() if field == "legacy" else _PagePipeline()
+        async with open_builtin_runtime(config, candidate_pipeline=pipeline) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Unicode quotes", summary="Literal source evidence", idempotency_key="unicode")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for observation in observations:
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(scope_id=scope.scope_id, observation=observation)
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            citation = (await search_pdf_pages(memory, question, 1))[0]
+            initial = unicodedata.normalize("NFC", expected) if field == "legacy" else expected
+            assert (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.text == initial
+            await memory.remember(
+                RememberMemoryRequest(entries=(MemoryEntryInput(kind="fact", text="Ordinary cafe\u0301 memo"),))
+            )
+            facts = [row.entry for row in (await memory.list()).entries if row.entry.kind == "fact"]
+            assert len(facts) == 1 and facts[0].text == "Ordinary café memo"
+        async with open_builtin_contexts(config) as contexts:
+            context = await contexts.get(scope.scope_id)
+            service = context.artifacts.memory
+            await service.organize(await service.head(context.artifacts.memory_artifact_id), mode="normalize")
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            assert (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.text == initial
+            current = (await search_pdf_pages(memory, question, 1))[0]
+            assert (await memory.get(GetMemoryEntryRequest(citation=current))).entry.text == expected
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [("record-alpha", "record-beta"), ("a", "b"), ("1", "2"), ("报告甲", "报告乙"), ("!!!", "???")],
+)
+def test_opaque_document_ids_use_registered_issuers_after_restart(tmp_path: Path, first: str, second: str) -> None:
     async def run() -> None:
         config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'opaque.db'}"))
         registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
@@ -1104,15 +1168,15 @@ def test_opaque_document_ids_use_registered_issuers_after_restart(tmp_path: Path
             "Securities registered pursuant to Section 12(g): None"
         )
         bodies = (
-            ("record-alpha", cover.format(issuer="BRIAR CORPORATION", symbol="BRI")),
+            (first, cover.format(issuer="BRIAR CORPORATION", symbol="BRI")),
             (
-                "record-alpha",
+                first,
                 "Software licences and related services. Transaction price is allocated between "
                 "performance obligations using standalone selling prices and market inputs.",
             ),
-            ("record-beta", cover.format(issuer="LINDEN.COM, INC.", symbol="LND")),
+            (second, cover.format(issuer="LINDEN.COM, INC.", symbol="LND")),
             (
-                "record-beta",
+                second,
                 "Our competitor is Briar. "
                 + "Software licences and related services have separate selling prices for each item. " * 30,
             ),

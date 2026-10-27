@@ -17,7 +17,6 @@ import json
 import os
 import sys
 import traceback
-import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -208,7 +207,7 @@ async def search(
                 if len(sources) != 1 or sources[0].source_id not in pages_by_source:
                     raise RuntimeError(f"{query.id}: invalid page Source reference")
                 page = pages_by_source[sources[0].source_id]
-                canonical_text = unicodedata.normalize("NFC", f"{page.document_id}\n{page.text}").strip()
+                canonical_text = f"{page.document_id}\n{page.text}".strip()
                 identity = (page.document_id, page.page_number)
                 if identity in identities or entry.text != canonical_text:
                     raise RuntimeError(f"{query.id}: duplicate page or mismatched citation text")

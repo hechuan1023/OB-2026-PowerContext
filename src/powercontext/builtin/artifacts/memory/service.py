@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 from time import perf_counter
 from typing import Literal, Protocol, TypeAlias, TypeVar, overload
@@ -624,7 +624,7 @@ class MemoryService:
             changes.extend(dedupe_changes)
 
         if mode in {"default", "normalize"}:
-            normalize_changes, new_versions = self._normalize_manifest_entries(
+            normalize_changes, new_versions = await self._normalize_manifest_entries(
                 base,
                 manifest,
                 current_by_entry,
@@ -1002,7 +1002,7 @@ class MemoryService:
                 changed_ids.add(entry_id)
         return changes, changed_ids
 
-    def _normalize_manifest_entries(
+    async def _normalize_manifest_entries(
         self,
         base: Memory,
         manifest: dict[str, MemoryManifestEntry],
@@ -1016,6 +1016,10 @@ class MemoryService:
             if entry_id in skip:
                 continue
             material = self._material_from_version(previous)
+            # Complete source quotations retain the source's literal Unicode.
+            # This also repairs older NFC-only projections by writing a new
+            # version, leaving previously issued citations immutable.
+            material = replace(material, text=await self._source_quote_text(previous, material.text))
             if _is_canonical_version(previous, material):
                 continue
             version = self._new_entry_version(
@@ -1039,6 +1043,25 @@ class MemoryService:
                 )
             )
         return changes, new_versions
+
+    async def _source_quote_text(self, previous: MemoryEntryVersion, canonical: str) -> str:
+        if self._source_resolver is None:
+            return canonical
+        quoted: str | None = None
+        for reference in previous.sources:
+            try:
+                source = await self._source_resolver.get_ref(reference)
+            except Exception:
+                log_safely(logger, logging.DEBUG, "Source unavailable while organizing Memory")
+                continue
+            content = _source_gate_content(source, self._source_resolver)
+            if content and content.strip() and normalize_text(content, enforce_limit=False) == canonical:
+                literal = content.strip()
+                if literal == previous.text.strip():
+                    return literal
+                if quoted is None:
+                    quoted = literal
+        return canonical if quoted is None else quoted
 
     async def _set_entry_state(
         self,
@@ -1662,19 +1685,29 @@ class MemoryService:
                 for source in candidate_sources
                 for content in (_source_gate_content(source, self._source_resolver),)
             )
-            return self._entry_material(
+            material = self._entry_material(
                 kind=candidate.kind,
                 text=normalized,
                 sources=sources,
                 artifacts=artifacts,
                 complete_source_body=complete_source_body,
             )
+            literal = candidate.text.strip()
+            if literal != normalized and any(
+                content is not None and content.strip() == literal
+                for source in candidate_sources
+                for content in (_source_gate_content(source, self._source_resolver),)
+            ):
+                # Hashes keep their established NFC encoding, while readable
+                # evidence must quote the authorized source without rewriting it.
+                material = replace(material, text=literal)
         except (TypeError, ValueError) as error:
             raise InvalidMemoryCandidateError(
                 "canonical",
                 str(error),
                 canonical_code=canonical_error_code(error),
             ) from error
+        return material
 
     async def _canonical_candidate_sources(
         self,

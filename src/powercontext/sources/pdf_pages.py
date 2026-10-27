@@ -894,15 +894,15 @@ def _target_documents(
     symbol_mentions = set(
         re.findall(r"(?<![\w.-])\$?([A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)?)(?!\w|[.-][A-Za-z0-9])", question)
     )
-    symbol_companies: set[str] = set()
+    symbol_documents: set[str] = set()
     companies = {name: _company_name(name) for name in documents}
     for name, symbol in (symbols or {}).items():
         if symbol in symbol_mentions:
-            symbol_companies.add(companies[name])
+            symbol_documents.add(name)
     matched: dict[str, set[str]] = {}
     for name, company in companies.items():
-        if len(company) >= 2 and (company in mentions or company in symbol_companies):
-            matched.setdefault(company, set()).add(name)
+        if name in symbol_documents or (len(company) >= 2 and company in mentions):
+            matched.setdefault(company or name, set()).add(name)
     for name, issuer in (issuers or {}).items():
         if len(issuer) >= 2 and issuer in mentions:
             matched.setdefault(issuer, set()).add(name)
