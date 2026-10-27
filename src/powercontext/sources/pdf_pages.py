@@ -815,6 +815,35 @@ def _company_name(document: str) -> str:
     )
 
 
+def _registered_issuer(body: str) -> str | None:
+    """Read the filing's own issuer, independently of its caller-assigned ID.
+
+    Restrict extraction to the cover's commission-file header and registered
+    securities section. A company mentioned in a note is not the report issuer.
+    """
+    if not re.search(r"securities\s+and\s+exchange\s+commission", body, re.I):
+        return None
+    securities = re.search(r"securities registered\s+(?:pursuant to|under)\s+section\s+12\s*\(b\)", body, re.I)
+    if securities is None:
+        return None
+    header = body[: securities.start()]
+    filing = re.search(r"^\s*commission\s+file\s+(?:numbers?|no\.?)\b[^\n]*\n", header, re.I | re.M)
+    if filing is None:
+        return None
+    lines = header[filing.end() : filing.end() + 500].splitlines()
+    for index, line in enumerate(lines):
+        name = line.strip()
+        legal_suffix = re.search(
+            r"\b(?:inc(?:orporated)?|corp(?:oration)?|company|co|plc|ltd|limited|llc|holdings|group)\.?$",
+            name,
+            re.I,
+        )
+        exact_label = re.match(r"\s*\(?exact\s+name\s+of\s+registrant\b", "\n".join(lines[index + 1 : index + 4]), re.I)
+        if (legal_suffix or exact_label) and re.fullmatch(r"[\w &.,'\u2019-]{2,160}", name):
+            return _company_name(re.sub(r"\.(?:com|net|org)\b", "", name, flags=re.I)) or None
+    return None
+
+
 def _common_stock_symbol(body: str) -> str | None:
     """Read an issuer's equity symbol from its own registered-securities table.
 
@@ -835,7 +864,7 @@ def _common_stock_symbol(body: str) -> str | None:
     row = table[stock.end() : stock.end() + 600]
     exchange = re.search(
         r"(?:The\s+)?(?:New York Stock Exchange|Nasdaq(?:\s+(?:Global|Select|Capital))*"
-        r"\s+(?:Stock Market|Market)|NYSE(?:\s+American)?)\b",
+        r"(?:\s+(?:Stock Market|Market))?|NYSE(?:\s+American)?)\b",
         row,
         re.I,
     )
@@ -846,7 +875,10 @@ def _common_stock_symbol(body: str) -> str | None:
 
 
 def _target_documents(
-    documents: frozenset[str], question: str, symbols: dict[str, str] | None = None
+    documents: frozenset[str],
+    question: str,
+    symbols: dict[str, str] | None = None,
+    issuers: dict[str, str] | None = None,
 ) -> frozenset[str]:
     """Restrict only explicit complete entities, retaining comparison subjects.
 
@@ -867,10 +899,13 @@ def _target_documents(
     for name, symbol in (symbols or {}).items():
         if symbol in symbol_mentions:
             symbol_companies.add(companies[name])
-    matched: dict[str, list[str]] = {}
+    matched: dict[str, set[str]] = {}
     for name, company in companies.items():
         if len(company) >= 2 and (company in mentions or company in symbol_companies):
-            matched.setdefault(company, []).append(name)
+            matched.setdefault(company, set()).add(name)
+    for name, issuer in (issuers or {}).items():
+        if len(issuer) >= 2 and issuer in mentions:
+            matched.setdefault(issuer, set()).add(name)
     selected: set[str] = set()
     for names in matched.values():
         dated = [name for name in names if years.intersection(_WORDS.findall(name.casefold()))]
@@ -895,12 +930,15 @@ async def _recall_documents(memory: Any, documents: frozenset[str], candidate_li
     return hits
 
 
-async def _pdf_inventory(memory: Any) -> tuple[dict[tuple[str, str, str], str], int, dict[str, str]]:
+async def _pdf_inventory(
+    memory: Any,
+) -> tuple[dict[tuple[str, str, str], str], int, dict[str, str], dict[str, str]]:
     # Listing bounds the pool and identifies PDF entries. Candidate citations
     # still come exclusively from public Memory.search results.
     stored = await memory.list()
     inventory: dict[tuple[str, str, str], str] = {}
     symbols: dict[str, set[str]] = {}
+    issuers: dict[str, set[str]] = {}
     for row in stored.entries:
         if not any(ref.source_type == "pdf-page" for ref in row.entry.sources):
             continue
@@ -910,11 +948,15 @@ async def _pdf_inventory(memory: Any) -> tuple[dict[tuple[str, str, str], str], 
         symbol = _common_stock_symbol(body)
         if symbol:
             symbols.setdefault(document, set()).add(symbol)
+        issuer = _registered_issuer(body)
+        if issuer:
+            issuers.setdefault(document, set()).add(issuer)
     # Conflicting disclosures must not turn ingestion order into entity selection.
     return (
         inventory,
         len(stored.entries),
         {doc: next(iter(values)) for doc, values in symbols.items() if len(values) == 1},
+        {doc: next(iter(values)) for doc, values in issuers.items() if len(values) == 1},
     )
 
 
@@ -1186,6 +1228,12 @@ def _rank_pages(
     # its name in BM25 can favor covers and boilerplate over a lease/segment note.
     query_tokens = re.findall(r"[a-z0-9]+", _normalize_question(question))
     companies = {_company_name(document) for document in targets}
+    companies.update(
+        issuer
+        for hit in hits
+        if _document_name(hit) in targets
+        if (issuer := _registered_issuer(hit.text.partition("\n")[2])) is not None
+    )
     subject_terms = {
         _stem(word)
         for start in range(len(query_tokens))
@@ -1246,11 +1294,11 @@ async def _page_candidates(
 ) -> tuple[list[MemoryHit], dict[tuple[str, str, str], float], frozenset[str]]:
     """Recall an eligible PDF pool using indexed, current-scope Memory searches."""
 
-    inventory, total_entries, symbols = await _pdf_inventory(memory)
+    inventory, total_entries, symbols, issuers = await _pdf_inventory(memory)
     if not inventory:
         return [], {}, frozenset()
     documents = frozenset(inventory.values())
-    targets = _target_documents(documents, question, symbols)
+    targets = _target_documents(documents, question, symbols, issuers)
     selected_documents = targets or documents
     eligible = {identity for identity, document in inventory.items() if document in selected_documents}
     candidates: dict[tuple[str, str, str], MemoryHit] = {}

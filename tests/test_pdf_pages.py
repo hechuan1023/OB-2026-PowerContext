@@ -1091,6 +1091,75 @@ def test_financial_note_paraphrases_retrieve_accounting_terms_after_restart(tmp_
     asyncio.run(run())
 
 
+def test_opaque_document_ids_use_registered_issuers_after_restart(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'opaque.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        cover = (
+            "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\nFORM 10-K\n"
+            "Commission File Number: 12345\n{issuer}\n"
+            "Securities registered pursuant to Section 12(b) of the Act:\n"
+            "Title of each class Trading Symbol Name of Exchange\n"
+            "Common Stock, par value $0.01 {symbol} NASDAQ\n"
+            "Securities registered pursuant to Section 12(g): None"
+        )
+        bodies = (
+            ("record-alpha", cover.format(issuer="BRIAR CORPORATION", symbol="BRI")),
+            (
+                "record-alpha",
+                "Software licences and related services. Transaction price is allocated between "
+                "performance obligations using standalone selling prices and market inputs.",
+            ),
+            ("record-beta", cover.format(issuer="LINDEN.COM, INC.", symbol="LND")),
+            (
+                "record-beta",
+                "Our competitor is Briar. "
+                + "Software licences and related services have separate selling prices for each item. " * 30,
+            ),
+            (
+                "record-gamma",
+                cover.format(
+                    issuer="BRAEMAR PARTNERS\n(Exact name of registrant as specified in its charter)", symbol="BRAE"
+                ),
+            ),
+            (
+                "record-gamma",
+                "Software licence prices are allocated to distinct service obligations using market inputs.",
+            ),
+        )
+        identities = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Opaque reports", summary="Issuer evidence", idempotency_key="opaque")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, (document, body) in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id=document, document_sha256="c" * 64, page_number=number, text=body)
+                )
+                identities[number] = source.name
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            for subject, expected in (("Briar", 2), ("BRI", 2), ("Linden", 4), ("Braemar Partners", 6)):
+                question = f"How does {subject} allocate the price of software licences and related services?"
+                citations = await search_pdf_pages(memory, question, 1)
+                assert len(citations) == 1
+                entry = (await memory.get(GetMemoryEntryRequest(citation=citations[0]))).entry
+                assert entry.sources[0].source_id == identities[expected], subject
+                assert citations == await search_pdf_pages(memory, question, 1)
+
+    asyncio.run(run())
+
+
 def test_repeated_tables_do_not_displace_distinct_narrative_evidence(tmp_path: Path) -> None:
     async def run() -> None:
         config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'coverage.db'}"))
