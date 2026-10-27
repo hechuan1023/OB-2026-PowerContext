@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 测试与覆盖率
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+
+# 本模块产生的中间产物
+*.context.json
+snapshot.json
+sdd-demo-*/
+/context.json          # 本仓库根目录不应有生成的 context.json（真实上下文在 data/self-context/）
+
+# 密钥与本地配置（绝不提交）
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+secrets.json

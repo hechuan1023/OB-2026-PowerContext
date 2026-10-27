@@ -1,0 +1,456 @@
+{
+  "project": "sample-app",
+  "code_root": ".",
+  "artifacts": [
+    {
+      "id": "SPEC-001",
+      "kind": "spec",
+      "title": "订单总价与折扣的计算规则（v2）",
+      "summary": "金额以「分」为单位；满 100 元可享折扣；折扣在服务端按订单维度算一次；结果四舍五入到分。",
+      "body": "1. 所有金额以「分」为最小单位的整数表示，禁止使用浮点金额。\n2. 订单商品小计达到 10000 分才可享受折扣。\n3. 折扣在服务端按订单维度计算一次，不做逐行商品折扣。\n4. 折扣后金额四舍五入到分。",
+      "status": "active",
+      "version": 2,
+      "priority": 10,
+      "effective_from": "2026-03-01",
+      "updated_at": "2026-03-01",
+      "scope": [
+        "app/pricing.py",
+        "app/order.py"
+      ],
+      "tags": [
+        "pricing",
+        "order",
+        "money"
+      ],
+      "keywords": [
+        "折扣",
+        "总价",
+        "取整",
+        "四舍五入",
+        "金额",
+        "定价",
+        "订单"
+      ],
+      "conflict_key": "pricing-rule",
+      "source": "docs/requirements.md"
+    },
+    {
+      "id": "SPEC-002",
+      "kind": "spec",
+      "title": "支付超时与重试策略（v1）",
+      "summary": "支付调用固定超时 3 秒，失败后固定重试 3 次。",
+      "body": "规则：支付调用固定超时 3 秒，失败后固定重试 3 次。",
+      "status": "superseded",
+      "version": 1,
+      "priority": 5,
+      "effective_from": "2026-02-01",
+      "updated_at": "2026-06-20",
+      "superseded_by": "SPEC-003",
+      "supersede_reason": "固定重试在网关抖动时会放大压力",
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "payment",
+        "retry"
+      ],
+      "keywords": [
+        "支付",
+        "重试",
+        "超时"
+      ],
+      "conflict_key": "payment-retry",
+      "source": "docs/requirements.md"
+    },
+    {
+      "id": "SPEC-003",
+      "kind": "spec",
+      "title": "支付超时与重试策略（v2）",
+      "summary": "单次支付默认超时 3 秒可配置；最多重试 3 次、间隔 200ms；金额非法不重试。",
+      "body": "1. 单次支付调用超时默认 3 秒，可按调用方配置。\n2. 失败后最多重试 3 次，重试间隔 200ms。\n3. 金额非法时不重试，直接失败。",
+      "status": "active",
+      "version": 2,
+      "priority": 10,
+      "effective_from": "2026-06-20",
+      "updated_at": "2026-06-20",
+      "supersedes": [
+        "SPEC-002"
+      ],
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "payment",
+        "retry"
+      ],
+      "keywords": [
+        "支付",
+        "重试",
+        "超时",
+        "退避"
+      ],
+      "conflict_key": "payment-retry",
+      "source": "docs/requirements.md"
+    },
+    {
+      "id": "SPEC-004",
+      "kind": "spec",
+      "title": "支付超时与重试策略（v1 遗留副本，未标记失效）",
+      "summary": "团队在 SPEC-002 被取代时忘了清理的旧版本，它自己仍写着 active。",
+      "body": "遗留副本：支付调用固定超时 3 秒，失败后固定重试 3 次。",
+      "status": "active",
+      "version": 1,
+      "priority": 0,
+      "effective_from": "2026-02-01",
+      "updated_at": "2026-02-01",
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "payment",
+        "retry",
+        "legacy"
+      ],
+      "keywords": [
+        "支付",
+        "重试",
+        "超时"
+      ],
+      "conflict_key": "payment-retry",
+      "source": "docs/requirements.md"
+    },
+    {
+      "id": "SPEC-005",
+      "kind": "spec",
+      "title": "订单总价与折扣的计算规则（v1 遗留副本，未标记失效）",
+      "summary": "v1 规定折扣后向下取整到分，v2 改成四舍五入；旧版本没被清理。",
+      "body": "遗留副本：折扣后金额向下取整到分。",
+      "status": "active",
+      "version": 1,
+      "priority": 0,
+      "effective_from": "2026-01-10",
+      "updated_at": "2026-01-10",
+      "scope": [
+        "app/pricing.py",
+        "app/order.py"
+      ],
+      "tags": [
+        "pricing",
+        "order",
+        "legacy"
+      ],
+      "keywords": [
+        "折扣",
+        "取整",
+        "金额"
+      ],
+      "conflict_key": "pricing-rule",
+      "source": "docs/requirements.md"
+    },
+    {
+      "id": "CTR-001",
+      "kind": "contract",
+      "title": "支付网关接口契约",
+      "summary": "charge(amount_cents) 成功返回支付流水号；金额非法抛 PaymentError 且不重试。",
+      "body": "对外只暴露 charge(amount_cents, timeout_seconds=3, max_retry=3) -> str。\n成功返回形如 PAY-00001001 的流水号；金额非正或 max_retry < 1 抛 PaymentError。\n调用方不得依赖内部重试次数，重试策略由服务端统一控制。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-02-01",
+      "updated_at": "2026-06-20",
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "api",
+        "payment",
+        "contract"
+      ],
+      "keywords": [
+        "支付",
+        "接口",
+        "契约",
+        "charge",
+        "支付网关"
+      ],
+      "source": "app/payment.py"
+    },
+    {
+      "id": "ADR-001",
+      "kind": "decision",
+      "title": "金额一律用「分」为最小单位",
+      "summary": "所有金额在系统内部用整数分表示，只在展示层转成元。",
+      "body": "决定：所有金额在系统内部用整数分表示，只在展示层转成元。\n理由：浮点金额累加会产生精度误差，退款对账时无法自证。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-01-05",
+      "updated_at": "2026-01-05",
+      "scope": [
+        "app/**"
+      ],
+      "tags": [
+        "money",
+        "decision"
+      ],
+      "keywords": [
+        "金额",
+        "分",
+        "整数",
+        "精度"
+      ],
+      "source": "docs/decisions.md"
+    },
+    {
+      "id": "ADR-002",
+      "kind": "decision",
+      "title": "折扣在客户端计算",
+      "summary": "折扣由客户端计算，服务端只信任客户端传来的折后金额。",
+      "body": "决定：折扣由客户端计算。\n作用范围：app/pricing.py、app/order.py。",
+      "status": "superseded",
+      "version": 1,
+      "priority": 0,
+      "effective_from": "2026-01-20",
+      "updated_at": "2026-03-01",
+      "superseded_by": "ADR-003",
+      "supersede_reason": "客户端可篡改折后金额，存在资损风险",
+      "scope": [
+        "app/pricing.py",
+        "app/order.py"
+      ],
+      "tags": [
+        "pricing",
+        "decision"
+      ],
+      "keywords": [
+        "折扣",
+        "客户端",
+        "信任"
+      ],
+      "source": "docs/decisions.md"
+    },
+    {
+      "id": "ADR-003",
+      "kind": "decision",
+      "title": "折扣在服务端按订单维度计算一次",
+      "summary": "折扣只在服务端按订单维度算一次，不做逐行商品折扣。",
+      "body": "决定：折扣只在服务端按订单维度算一次。\n作用范围：app/pricing.py、app/order.py。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-03-01",
+      "updated_at": "2026-03-01",
+      "supersedes": [
+        "ADR-002"
+      ],
+      "scope": [
+        "app/pricing.py",
+        "app/order.py"
+      ],
+      "tags": [
+        "pricing",
+        "decision"
+      ],
+      "keywords": [
+        "折扣",
+        "服务端",
+        "订单"
+      ],
+      "source": "docs/decisions.md"
+    },
+    {
+      "id": "ADR-004",
+      "kind": "decision",
+      "title": "支付重试固定退避 200ms",
+      "summary": "重试间隔固定 200ms，不做指数退避。",
+      "body": "决定：重试间隔固定 200ms。\n理由：网关故障通常在秒级恢复，指数退避会让用户多等。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-04-02",
+      "updated_at": "2026-04-02",
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "payment",
+        "decision"
+      ],
+      "keywords": [
+        "重试",
+        "退避",
+        "支付"
+      ],
+      "source": "docs/decisions.md"
+    },
+    {
+      "id": "VERIFY-001",
+      "kind": "verification",
+      "title": "定价模块单元测试",
+      "summary": "验证折扣四舍五入到分与折扣门槛判断",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "updated_at": "2026-03-01",
+      "scope": [
+        "app/pricing.py"
+      ],
+      "tags": [
+        "test",
+        "pricing"
+      ],
+      "keywords": [
+        "折扣",
+        "取整",
+        "定价",
+        "测试"
+      ],
+      "source": "tests/test_pricing.py",
+      "targets": [
+        "app/pricing.py"
+      ],
+      "test_path": "tests/test_pricing.py",
+      "validates": [
+        "SPEC-001"
+      ],
+      "command": "python -m unittest discover -s tests",
+      "recorded_at": "2026-03-01",
+      "recorded_files": {
+        "app/pricing.py": "2cc666ea8f5692fe87fdf223e7b1f9216eda117a382c6c0e1c47581b3fd2335d"
+      },
+      "closure_files": [
+        "app/pricing.py"
+      ],
+      "closure": "python",
+      "fingerprint": "2b4a9539126c629ec49f7b7c05e71972b1474cbc9c2a4b0408a726828f2df492",
+      "test_fingerprint": "21e93b0f60517f14fa66b3c8f54aac665ae3308184caf2ec6ad10309f97f2b4c"
+    },
+    {
+      "id": "VERIFY-002",
+      "kind": "verification",
+      "title": "订单模块单元测试",
+      "summary": "验证订单小计与订单总价的取整结果",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "updated_at": "2026-03-01",
+      "scope": [
+        "app/order.py"
+      ],
+      "tags": [
+        "test",
+        "order"
+      ],
+      "keywords": [
+        "订单",
+        "总价",
+        "测试"
+      ],
+      "source": "tests/test_order.py",
+      "targets": [
+        "app/order.py"
+      ],
+      "test_path": "tests/test_order.py",
+      "validates": [
+        "SPEC-001"
+      ],
+      "command": "python -m unittest discover -s tests",
+      "recorded_at": "2026-03-01",
+      "recorded_files": {
+        "app/order.py": "de987652bfccddf1781bc9fb2967ccda0445daa57e1e74dc8a47f989f7fc7665",
+        "app/pricing.py": "2cc666ea8f5692fe87fdf223e7b1f9216eda117a382c6c0e1c47581b3fd2335d"
+      },
+      "closure_files": [
+        "app/order.py",
+        "app/pricing.py"
+      ],
+      "closure": "python",
+      "fingerprint": "d762ca34903bf984356037ed4a5f49bb61b767a56e593b86b98396ed9acb2d9d",
+      "test_fingerprint": "b830649b00cbe9a4793cb5b7019c6a2f5d575b048a0b04aec8adcabb7067e60b"
+    },
+    {
+      "id": "VERIFY-003",
+      "kind": "verification",
+      "title": "支付模块单元测试",
+      "summary": "验证支付流水号格式与非法参数的报错行为",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "updated_at": "2026-06-20",
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "test",
+        "payment"
+      ],
+      "keywords": [
+        "支付",
+        "接口",
+        "测试"
+      ],
+      "source": "tests/test_payment.py",
+      "targets": [
+        "app/payment.py"
+      ],
+      "test_path": "tests/test_payment.py",
+      "validates": [
+        "SPEC-003",
+        "CTR-001"
+      ],
+      "command": "python -m unittest discover -s tests",
+      "recorded_at": "2026-06-20",
+      "recorded_files": {
+        "app/payment.py": "03edebd0a49f51e343277999925285b682911518c10527443b35de1fba8a8364"
+      },
+      "closure_files": [
+        "app/payment.py"
+      ],
+      "closure": "python",
+      "fingerprint": "24bb4d72b2e90564f7feac07e1a6333d7eb83a07b77a1a41289912b5a8d4f5b5",
+      "test_fingerprint": "b8e649a41c19d31ba739e1af5a5b500630dc751de6a88b3c7cdb84abb2e36278"
+    },
+    {
+      "id": "VERIFY-004",
+      "kind": "verification",
+      "title": "支付重试早期用例（随 SPEC-002 一起提交）",
+      "summary": "验证的是已被取代的 SPEC-002 v1，应当被标记为 superseded_spec",
+      "status": "active",
+      "version": 1,
+      "priority": 0,
+      "updated_at": "2026-02-01",
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "test",
+        "payment",
+        "legacy"
+      ],
+      "keywords": [
+        "重试",
+        "超时",
+        "支付"
+      ],
+      "source": "tests/test_payment_retry_legacy.py",
+      "targets": [
+        "app/payment.py"
+      ],
+      "test_path": "tests/test_payment_retry_legacy.py",
+      "validates": [
+        "SPEC-002"
+      ],
+      "command": "python -m unittest discover -s tests",
+      "recorded_at": "2026-02-01",
+      "recorded_files": {
+        "app/payment.py": "03edebd0a49f51e343277999925285b682911518c10527443b35de1fba8a8364"
+      },
+      "closure_files": [
+        "app/payment.py"
+      ],
+      "closure": "python",
+      "fingerprint": "24bb4d72b2e90564f7feac07e1a6333d7eb83a07b77a1a41289912b5a8d4f5b5",
+      "test_fingerprint": "5fbe67d97bf8b4c2b9248e58dd5e8564a51fd44b61fbaafb2166eaa4e93ca057"
+    }
+  ]
+}

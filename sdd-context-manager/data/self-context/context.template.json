@@ -1,0 +1,494 @@
+{
+  "project": "sdd-context-manager",
+  "code_root": ".",
+  "artifacts": [
+    {
+      "id": "SPEC-001",
+      "kind": "spec",
+      "title": "新增一种制品类型需要改哪些地方",
+      "summary": "加一种制品类型要同时动数据模型、解析器、CLI 与 MCP 五处，漏一处就会静默失效。",
+      "body": "新增一种制品类型需要修改：\n1. 数据模型（sddctx/model.py）的 ArtifactKind 枚举加一项；\n2. 解析器（sddctx/resolver.py）的 pick() 分支加一个类型筛选；\n3. 命令行（sddctx/cli.py）的 build_parser() 加子命令；\n4. MCP 服务端（sddctx/mcp_server.py）的 TOOLS 加工具定义、_DISPATCH 加分发项；\n5. 文档（docs/设计说明.md）的「关键实现位置速查」同步更新。\n任何一处漏掉，该类型就会在某个接入方式下被静默忽略。",
+      "status": "active",
+      "version": 2,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "supersedes": [],
+      "scope": [
+        "sddctx/model.py",
+        "sddctx/resolver.py",
+        "sddctx/cli.py",
+        "sddctx/mcp_server.py"
+      ],
+      "tags": ["架构", "扩展"],
+      "keywords": ["新增", "制品类型", "扩展", "枚举"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "SPEC-002",
+      "kind": "spec",
+      "title": "上下文输出只包含当前生效的内容",
+      "summary": "只输出生效的制品，但必须显式列出已失效的制品及其原因。",
+      "body": "1. 只有 status 为 active 的制品才进入「生效中」区块；\n2. 已失效的制品不丢弃，移到「已失效、禁止再照做的制品」区块，并写明失效原因和替代者；\n3. 冲突必须裁决到唯一赢家，输家标为「已被覆盖」；\n4. 与当前任务无关的冲突不输出，避免稀释注意力。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/resolver.py",
+        "sddctx/render.py"
+      ],
+      "tags": ["输出", "核心"],
+      "keywords": ["生效", "失效", "冲突", "裁决", "输出"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "SPEC-003",
+      "kind": "spec",
+      "title": "判断代码是否变化一律用内容指纹，不用 git",
+      "summary": "工程交付时常常不带 .git 目录，内容 sha256 在任何环境下都成立。",
+      "body": "1. 制品的 recorded_files 存 {相对路径: sha256}；\n2. 覆盖范围的聚合指纹是 sha256(排序后的 \"路径:哈希\" 拼接)；\n3. 禁止使用 git commit hash 作为变更依据；\n4. 禁止用 mtime 判断变化（复制文件会改 mtime，内容没变）。",
+      "status": "active",
+      "version": 2,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "supersedes": [],
+      "scope": [
+        "sddctx/store.py",
+        "sddctx/baseline.py"
+      ],
+      "tags": ["指纹", "存储"],
+      "keywords": ["指纹", "sha256", "哈希", "git", "变化"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "SPEC-004",
+      "kind": "spec",
+      "title": "整个模块零第三方依赖",
+      "summary": "只允许用 Python 3.8+ 标准库，评测机不保证有 pip 网络。",
+      "body": "1. 任何 import 只能来自标准库或本项目内的模块；\n2. MCP 服务端用标准库手写 JSON-RPC over stdio，不引入 mcp 包；\n3. 测试用 python -m unittest，不引入 pytest；\n4. 交付后 git clone 下来就能直接跑，不允许有安装步骤。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/**",
+        "scripts/**",
+        "tests/**"
+      ],
+      "tags": ["依赖", "交付"],
+      "keywords": ["依赖", "标准库", "第三方", "pip", "零依赖"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "SPEC-005",
+      "kind": "spec",
+      "title": "判断不了的时候必须说判断不了",
+      "summary": "缺少基线时验证状态是 unknown，绝不能猜成有效或失效。",
+      "body": "1. 既没有 recorded_files 也没有 fingerprint 的验证，状态必须是 unknown；\n2. unknown 的判定必须排在代码漂移检查之前，否则会被误判成 stale_code；\n3. 扫描器产出的制品一律是 draft，绝不自动生效。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/resolver.py",
+        "sddctx/scan.py"
+      ],
+      "tags": ["验证", "保守"],
+      "keywords": ["unknown", "基线", "判断不了", "draft", "保守"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "SPEC-006",
+      "kind": "spec",
+      "title": "间接依赖变化同样要让验证失效",
+      "summary": "被测文件没变，但它 import 的文件变了，验证结论也不再成立。",
+      "body": "1. verification 的覆盖范围 = 直接目标展开 ∪ import 闭包；\n2. import 闭包由 sddctx/deps.py 做 BFS 解析 from .x import y 与 import x；\n3. 当前只解析 Python，C++ / Java 等语言需要扩展 deps.py 的解析器；\n4. 闭包内的文件新增也算漂移（覆盖范围变大 → 旧基线不再完整）。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/deps.py",
+        "sddctx/resolver.py"
+      ],
+      "tags": ["依赖", "验证"],
+      "keywords": ["依赖", "闭包", "import", "间接", "漂移"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "SPEC-007",
+      "kind": "spec",
+      "title": "所有输出必须是确定性的",
+      "summary": "同样的输入永远得到同样的输出，因为有效性判断不能依赖模型临场发挥。",
+      "body": "1. 所有排序必须显式指定排序键，不依赖 dict 插入顺序；\n2. 冲突裁决规则写死为版本号 → 优先级 → 生效日期 → 更新时间；\n3. 输出里不得出现随机性、不得调用模型；\n4. 结论必须能被断言、被写进回归测试。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/**"
+      ],
+      "tags": ["确定性", "测试"],
+      "keywords": ["确定性", "可复现", "排序", "回归测试"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "CTR-001",
+      "kind": "contract",
+      "title": "MCP 服务端对外暴露的五个工具",
+      "summary": "resolve_context / check_verification / list_artifacts / export_handover / import_handover。",
+      "body": "对外只暴露这五个工具，参数名固定：\n- resolve_context(task 必填, session_id, files[], min_score, format)\n- check_verification(verification_id 可选)\n- list_artifacts(kind 可选)\n- export_handover(task 必填, notes, open_questions[], decisions_made[])\n- import_handover(snapshot 必填)\n协议版本固定为 2024-11-05，传输方式是 stdio 上的 newline-delimited JSON-RPC 2.0。\n工具返回值统一是 {\"content\": [{\"type\": \"text\", \"text\": ...}], \"isError\": bool}。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/mcp_server.py"
+      ],
+      "tags": ["MCP", "接口"],
+      "keywords": ["MCP", "工具", "协议", "参数"],
+      "conflict_key": "",
+      "source": "sddctx/mcp_server.py"
+    },
+    {
+      "id": "CTR-002",
+      "kind": "contract",
+      "title": "命令行参数契约",
+      "summary": "所有子命令的 --context 同时接受文件路径和所在目录。",
+      "body": "sddctx <子命令> --context <文件或目录> [--code-root <目录>]\n子命令：resolve / verify / report / handover export / handover check / scan / baseline / mcp。\n约束：\n1. --context 传目录时，内部按 context.json / sdd-context.json / engineering-context.json 的顺序查找；\n2. --code-root 传相对路径时按当前工作目录解析，context.json 里的 code_root 按 context 文件所在目录解析；\n3. 两种传法在任何子命令下行为必须一致。",
+      "status": "active",
+      "version": 2,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/cli.py",
+        "sddctx/store.py"
+      ],
+      "tags": ["CLI", "接口"],
+      "keywords": ["命令行", "参数", "context", "code-root", "目录"],
+      "conflict_key": "",
+      "source": "sddctx/cli.py"
+    },
+    {
+      "id": "ADR-001",
+      "kind": "decision",
+      "title": "用内容 sha256 而不是 git commit 判断代码变化",
+      "summary": "很多工程交付时并不带 .git 目录，内容哈希在任何环境下都成立。",
+      "body": "决定：判断「代码有没有变过」一律用文件内容的 sha256，不用 git commit hash。\n理由：打包、拷贝、内网镜像、评测机拉源码，这些场景经常没有 .git 目录，git 方案直接不可用。\n影响范围：sddctx/store.py 的 file_hash / fingerprint / diff_against，sddctx/baseline.py 的 recorded_files。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/store.py",
+        "sddctx/baseline.py"
+      ],
+      "tags": ["存储"],
+      "keywords": ["指纹", "sha256", "git", "哈希"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "ADR-002",
+      "kind": "decision",
+      "title": "用 sha256 而不是 mtime 判断文件是否变化",
+      "summary": "复制文件会改 mtime 但内容没变，用时间戳会误报漂移。",
+      "body": "决定：变更检测只用内容哈希，不看修改时间。\n理由：git checkout、复制文件、批量解压都会刷新 mtime，用时间戳会把「没改」误判成「改了」，产生大量假告警。\n影响范围：sddctx/store.py 的 _scan_code 与 file_hash。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/store.py"
+      ],
+      "tags": ["存储"],
+      "keywords": ["mtime", "时间戳", "sha256"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "ADR-003",
+      "kind": "decision",
+      "title": "手写 MCP 服务端而不引入 mcp 包",
+      "summary": "MCP 协议就是 stdin 一行 JSON、stdout 一行 JSON，标准库几十行就够。",
+      "body": "决定：用标准库手写 JSON-RPC 2.0 over stdio 的 MCP 服务端，不引入 mcp 第三方包。\n理由：评测机不保证有 pip 网络；能 clone 下来就能跑是基本功要求。\n影响范围：sddctx/mcp_server.py。代价是只实现了 MCP 的 tools 那部分，没有做 resources / prompts / sampling。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/mcp_server.py"
+      ],
+      "tags": ["MCP"],
+      "keywords": ["MCP", "协议", "JSON-RPC", "标准库"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "ADR-004",
+      "kind": "decision",
+      "title": "取代链展开到最终生效的那一条",
+      "summary": "A→B→C 时，A 和 B 的替代者都指向 C，中间环节不能停。",
+      "body": "决定：沿取代链往下追到链尾，把 replaced_by 统一指向最终生效的制品。\n理由：接手的人问「A 被谁取代了」，答案要是「C（最终生效的那个）」，而不是「B（自己也不算数了）」。\n实现：resolver._follow_chain，链深度上限 16，防止数据里的环导致死循环。\n副作用：链展开后必须同步更新 detail 文字，否则会出现「替代者是 C、详情却说被 B 取代」的自相矛盾。",
+      "status": "active",
+      "version": 2,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/resolver.py"
+      ],
+      "tags": ["生命周期"],
+      "keywords": ["取代链", "supersede", "链", "替代者"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "ADR-005",
+      "kind": "decision",
+      "title": "扫描结果一律是 draft，基线必须人工建立",
+      "summary": "扫描是猜的，基线的语义是「这些代码通过了这些验证」，都不能自动做。",
+      "body": "决定：scan 产出的所有制品状态一律是 draft；基线（recorded_files / fingerprint）只能由人显式执行 sddctx baseline 生成。\n理由：扫描是启发式猜测，让猜测直接约束 AI 助手是危险的；基线如果自动建立，会把「当前就是错的代码」固化成「验证通过」，之后每次都报有效。\n影响范围：sddctx/scan.py、sddctx/baseline.py。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/scan.py",
+        "sddctx/baseline.py"
+      ],
+      "tags": ["保守"],
+      "keywords": ["draft", "基线", "扫描", "人工"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "ADR-006",
+      "kind": "decision",
+      "title": "冲突按固定优先级链裁决，不交给模型判断",
+      "summary": "版本号 → 优先级 → 生效日期 → 更新时间，取最新且优先级最高的一条。",
+      "body": "决定：同一 conflict_key 下多条同时生效的制品，用写死的比较链裁决出唯一赢家。\n理由：把两条矛盾的规格都丢给模型，模型只能自己猜；明确裁决 + 保留一条，是把「选择」这一步从概率行为变成确定性行为。\n影响范围：sddctx/resolver.py 的 detect_conflicts 与 _shadowed_ids。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "effective_from": "2026-10-26",
+      "updated_at": "2026-10-27",
+      "scope": [
+        "sddctx/resolver.py"
+      ],
+      "tags": ["冲突"],
+      "keywords": ["冲突", "裁决", "优先级", "conflict_key"],
+      "conflict_key": "",
+      "source": "docs/设计说明.md"
+    },
+    {
+      "id": "VERIFY-001",
+      "kind": "verification",
+      "title": "有效性判定单元测试",
+      "summary": "生命周期、取代链、作用域漂移、冲突裁决、失效上报。",
+      "status": "active",
+      "version": 1,
+      "scope": [
+        "sddctx/resolver.py"
+      ],
+      "tags": ["测试"],
+      "keywords": ["有效性", "测试"],
+      "validates": [
+        "SPEC-001",
+        "SPEC-002",
+        "SPEC-007"
+      ],
+      "targets": [
+        "sddctx/resolver.py"
+      ],
+      "test_path": "tests/test_resolver.py",
+      "closure": "python",
+      "recorded_files": {},
+      "fingerprint": "",
+      "test_fingerprint": "",
+      "recorded_at": ""
+    },
+    {
+      "id": "VERIFY-002",
+      "kind": "verification",
+      "title": "验证失效状态机单元测试",
+      "summary": "valid / stale_code / stale_test / superseded_spec / orphan / unknown 六种状态与覆盖缺口。",
+      "status": "active",
+      "version": 1,
+      "scope": [
+        "sddctx/resolver.py",
+        "sddctx/deps.py"
+      ],
+      "tags": ["测试"],
+      "keywords": ["验证", "测试", "失效"],
+      "validates": [
+        "SPEC-005",
+        "SPEC-006"
+      ],
+      "targets": [
+        "sddctx/resolver.py",
+        "sddctx/deps.py"
+      ],
+      "test_path": "tests/test_staleness.py",
+      "closure": "python",
+      "recorded_files": {},
+      "fingerprint": "",
+      "test_fingerprint": "",
+      "recorded_at": ""
+    },
+    {
+      "id": "VERIFY-003",
+      "kind": "verification",
+      "title": "跨会话交接单元测试",
+      "summary": "快照导出、导入回查、过期项分类、代码漂移检测。",
+      "status": "active",
+      "version": 1,
+      "scope": [
+        "sddctx/handover.py"
+      ],
+      "tags": ["测试"],
+      "keywords": ["交接", "测试", "快照"],
+      "validates": [
+        "SPEC-002"
+      ],
+      "targets": [
+        "sddctx/handover.py"
+      ],
+      "test_path": "tests/test_handover.py",
+      "closure": "python",
+      "recorded_files": {},
+      "fingerprint": "",
+      "test_fingerprint": "",
+      "recorded_at": ""
+    },
+    {
+      "id": "VERIFY-004",
+      "kind": "verification",
+      "title": "MCP 协议与命令行单元测试",
+      "summary": "协议握手、tools/list、五个工具的调用、stdio 循环、CLI 各子命令。",
+      "status": "active",
+      "version": 1,
+      "scope": [
+        "sddctx/mcp_server.py",
+        "sddctx/cli.py"
+      ],
+      "tags": ["测试"],
+      "keywords": ["MCP", "CLI", "测试"],
+      "validates": [
+        "CTR-001",
+        "CTR-002"
+      ],
+      "targets": [
+        "sddctx/mcp_server.py",
+        "sddctx/cli.py"
+      ],
+      "test_path": "tests/test_mcp_and_cli.py",
+      "closure": "python",
+      "recorded_files": {},
+      "fingerprint": "",
+      "test_fingerprint": "",
+      "recorded_at": ""
+    },
+    {
+      "id": "VERIFY-005",
+      "kind": "verification",
+      "title": "分词与 glob 语义单元测试",
+      "summary": "分词、CJK 二字组、glob 跨目录语义、路径提取、模型与依赖闭包。",
+      "status": "active",
+      "version": 1,
+      "scope": [
+        "sddctx/textutil.py",
+        "sddctx/model.py",
+        "sddctx/deps.py"
+      ],
+      "tags": ["测试"],
+      "keywords": ["分词", "glob", "测试"],
+      "validates": [
+        "SPEC-007"
+      ],
+      "targets": [
+        "sddctx/textutil.py",
+        "sddctx/model.py",
+        "sddctx/deps.py"
+      ],
+      "test_path": "tests/test_tools.py",
+      "closure": "python",
+      "recorded_files": {},
+      "fingerprint": "",
+      "test_fingerprint": "",
+      "recorded_at": ""
+    },
+    {
+      "id": "VERIFY-006",
+      "kind": "verification",
+      "title": "扫描器失败路径单元测试",
+      "summary": "路径不存在要报错、扫不到文件要警告并返回非零退出码、模板必须可加载。",
+      "status": "active",
+      "version": 1,
+      "scope": [
+        "sddctx/scan.py",
+        "sddctx/cli.py"
+      ],
+      "tags": ["测试"],
+      "keywords": ["扫描", "测试", "失败路径"],
+      "validates": [
+        "SPEC-005"
+      ],
+      "targets": [
+        "sddctx/scan.py"
+      ],
+      "test_path": "tests/test_scan.py",
+      "closure": "python",
+      "recorded_files": {},
+      "fingerprint": "",
+      "test_fingerprint": "",
+      "recorded_at": ""
+    },
+    {
+      "id": "VERIFY-007",
+      "kind": "verification",
+      "title": "端到端演示：真实改代码后模块是否报出验证失效",
+      "summary": "把折扣取整改成向下取整，让单测从绿变红，再看模块是否报 stale_code。",
+      "status": "active",
+      "version": 1,
+      "scope": [
+        "scripts/demo_change.py"
+      ],
+      "tags": ["测试", "演示"],
+      "keywords": ["端到端", "演示", "验证", "真实修改"],
+      "validates": [
+        "SPEC-002",
+        "SPEC-006"
+      ],
+      "targets": [
+        "scripts/demo_change.py"
+      ],
+      "test_path": "scripts/demo_change.py",
+      "closure": "python",
+      "recorded_files": {},
+      "fingerprint": "",
+      "test_fingerprint": "",
+      "recorded_at": ""
+    }
+  ]
+}
