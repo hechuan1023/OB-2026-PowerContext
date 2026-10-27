@@ -39,6 +39,7 @@ from pypdf.generic import (
 
 from powercontext.builtin.artifacts.memory.models import MemoryCitation, MemoryHit
 from powercontext.builtin.runtime.models import GetMemoryEntryRequest, SearchMemoryRequest
+from powercontext.sources._pdf_unicode import LATIN_LIGATURES, restore_pdf_unicode
 from powercontext.sources.definitions import AdapterSourceDefinition
 from powercontext.sources.models import Source, SourceMaterialization
 from powercontext.sources.projections import TEXT_EVIDENCE_PROJECTION_KEY, TextEvidence
@@ -459,10 +460,11 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
         if reader.is_encrypted and not reader.decrypt(""):
             raise ValueError("PDF requires a non-empty password")  # noqa: TRY003, TRY301
         _validate_pdf_streams(reader)
+        restore_pdf_unicode(reader)
         pages = []
         for number, page in enumerate(reader.pages, start=1):
             _validate_page_content(page, reader)
-            text = _extract_page_text(page)
+            text = _extract_page_text(page).translate(LATIN_LIGATURES)
             pages.append(
                 PDFPageInput(
                     document_id=value.document_id,

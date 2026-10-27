@@ -29,7 +29,9 @@ from pypdf.generic import (
     DictionaryObject,
     EncodedStreamObject,
     NameObject,
+    NullObject,
     NumberObject,
+    TextStringObject,
 )
 
 from powercontext.builtin.artifacts.memory import MemoryEntryInput
@@ -142,6 +144,104 @@ def test_all_text_and_blank_pages_keep_exact_physical_provenance() -> None:
         "document_sha256": sha256(content).hexdigest(),
         "page_number": 1,
     }
+
+
+def _marked_glyph_document(
+    actuals: tuple[str, ...] = ("ti",), *, named: bool = False, form: bool = False, valid_mapping: bool = False
+) -> bytes:
+    writer = PdfWriter()
+    cmap = DecodedStreamObject()
+    cmap.set_data(
+        b"begincmap\n1 begincodespacerange\n<00> <ff>\nendcodespacerange\n"
+        b"2 beginbfchar\n<02> <fb00>\n<03> <0000>\nendbfchar\n"
+        b"1 beginbfrange\n<01> <01> <" + (b"0041" if valid_mapping else b"0000") + b">\nendbfrange\nendcmap"
+    )
+    font = writer._add_object(
+        DictionaryObject({
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+            NameObject("/Encoding"): NameObject("/WinAnsiEncoding"),
+            NameObject("/ToUnicode"): writer._add_object(cmap),
+        })
+    )
+    for actual in actuals:
+        page = writer.add_blank_page(width=600, height=400)
+        resources = DictionaryObject({NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})})
+        if named:
+            resources[NameObject("/Properties")] = writer._add_object(
+                DictionaryObject({
+                    NameObject("/Replacement"): writer._add_object(
+                        DictionaryObject({NameObject("/ActualText"): TextStringObject(actual)})
+                    )
+                })
+            )
+            properties = b"/Replacement"
+        else:
+            properties = b"<< /ActualText <feff" + actual.encode("utf-16-be").hex().encode() + b"> >>"
+        stream = DecodedStreamObject()
+        stream.set_data(
+            b"BT /F1 12 Tf 30 300 Td (opera) Tj /Span " + properties + b" BDC /Inner BMC [<01>] TJ EMC EMC "
+            b"(ons 1234.50 o) Tj <02> Tj (erings unknown:) Tj <03> Tj ET"
+        )
+        page[NameObject("/Resources")] = resources
+        if form:
+            stream[NameObject("/Type")] = NameObject("/XObject")
+            stream[NameObject("/Subtype")] = NameObject("/Form")
+            stream[NameObject("/BBox")] = ArrayObject([NumberObject(n) for n in (0, 0, 600, 400)])
+            stream[NameObject("/Resources")] = resources
+            page[NameObject("/Resources")] = DictionaryObject({
+                NameObject("/XObject"): DictionaryObject({NameObject("/Nested"): writer._add_object(stream)})
+            })
+            stream = DecodedStreamObject()
+            stream.set_data(b"/Nested Do")
+        page.replace_contents(stream.flate_encode())
+    writer.add_blank_page(width=600, height=400)
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+@pytest.mark.parametrize(("named", "form"), [(False, False), (True, False), (True, True)])
+def test_actual_text_recovers_missing_glyphs_without_guessing(named: bool, form: bool) -> None:
+    content = _marked_glyph_document(named=named, form=form)
+    value = PDFDocumentInput(document_id="Embedded-font", content=content)
+    pages = parse_pdf_document(value)
+    assert "operations 1234.50 offerings" in pages[0].text
+    # An unannotated missing glyph is not replaced by a guessed letter.
+    assert pages[0].text.count("\0") == 1
+    assert pages[-1].text == ""
+    assert {page.document_sha256 for page in pages} == {sha256(content).hexdigest()}
+    assert parse_pdf_document(value) == pages
+
+
+def test_conflicting_actual_text_on_later_pages_does_not_change_shared_font() -> None:
+    pages = parse_pdf_document(
+        PDFDocumentInput(document_id="Conflicting-font", content=_marked_glyph_document(("ti", "ff")))
+    )
+    assert len(pages) == 3
+    for page in pages[:2]:
+        assert "opera\0ons" in page.text
+        assert page.text.count("\0") == 2
+
+
+def test_actual_text_does_not_overwrite_existing_valid_unicode_mapping() -> None:
+    pages = parse_pdf_document(
+        PDFDocumentInput(document_id="Mapped-font", content=_marked_glyph_document(valid_mapping=True))
+    )
+    assert "operaAons" in pages[0].text
+
+
+def test_null_contents_remains_a_blank_physical_page() -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=600, height=400)
+    page[NameObject("/Contents")] = writer._add_object(NullObject())
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="Null-content", content=output.getvalue()))
+    assert len(pages) == 1
+    assert pages[0].page_number == 1
+    assert pages[0].text == ""
 
 
 def test_identity_includes_document_revision_and_page_with_bounded_unicode_names() -> None:
