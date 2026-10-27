@@ -680,15 +680,22 @@ def _pick_code(
     # 规格正文里点名的文件优先级最高。
     # 例如 SPEC-001 正文里写着「新增新的词法规则（src/observer/sql/parser/lex_sql.l）」，
     # 那这个文件就比同一作用域下的其它文件更值得先看。
+    #
+    # 正文只写了文件名（没写目录）时，才退化成按文件名匹配；这种匹配不能冒充
+    # 「明确要求改动」，否则仓库里所有同名的 cli.py 都会被说成是规格点名要改的。
     by_basename: Dict[str, List[str]] = {}
     for path in store.code_files:
         by_basename.setdefault(path.rsplit("/", 1)[-1], []).append(path)
     for artifact in bundle.specs + bundle.contracts + bundle.decisions:
         for mention in extract_path_mentions(artifact.body):
+            if mention in store.code_files:
+                scores[mention] = max(scores.get(mention, 0.0), 0.95)
+                reasons[mention] = "%s 明确要求改动的文件" % artifact.id
+                continue
             base = mention.rsplit("/", 1)[-1]
             for path in by_basename.get(base, []):
-                scores[path] = max(scores.get(path, 0.0), 0.95)
-                reasons[path] = "%s 明确要求改动的文件" % artifact.id
+                scores[path] = max(scores.get(path, 0.0), 0.7)
+                reasons.setdefault(path, "%s 提到 %s（按文件名匹配）" % (artifact.id, base))
 
     for path in store.code_files:
         if path in scores:

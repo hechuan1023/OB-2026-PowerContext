@@ -855,7 +855,7 @@ AI 助手自己决定什么时候调 `resolve_context`，不需要你手动粘�
 ## 第 8 章：跑测试、跑演示、交付前自查清单
 
 ```bash
-python -m unittest discover -s tests/powercontext_sdd -t .            # 期望：Ran 68 tests ... OK
+python -m unittest discover -s tests/powercontext_sdd -t .            # 期望：Ran 69 tests ... OK
 python examples/sdd-context-manager/demo_change.py                    # 期望：18/18 项通过
 ```
 

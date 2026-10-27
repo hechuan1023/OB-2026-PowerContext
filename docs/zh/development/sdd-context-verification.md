@@ -18,7 +18,7 @@
 | 模块不误伤无关验证 | 只改定价模块 | ✅ VERIFY-003 仍为 `valid` |
 | 模块能处理需求演进 | 真实新增取代关系 | ✅ 旧规格失效、新规格生效、覆盖缺口被指出 |
 | 模块能处理跨会话交接 | 导出快照 → 改动 → 回查 | ✅ 4 项过期被准确列出 |
-| 自动化回归 | 单元测试 | ✅ `Ran 68 tests … OK` |
+| 自动化回归 | 单元测试 | ✅ `Ran 69 tests … OK` |
 | 端到端流程 | 演示脚本 | ✅ `18/18 项通过` |
 
 **核心证据**：第 2 节的「代码从绿变红」和「模块报告 stale_code」是**两条独立证据**，
@@ -314,7 +314,7 @@ python -m unittest discover -s tests/powercontext_sdd -t .
 真实输出：
 
 ```
-Ran 68 tests in 0.717s
+Ran 69 tests in 0.429s
 
 OK
 ```
@@ -328,6 +328,7 @@ OK
 | `tests/powercontext_sdd/test_handover.py` | 快照导出、导入回查、过期项分类、代码漂移检测 |
 | `tests/powercontext_sdd/test_mcp_and_cli.py` | MCP 协议握手、`tools/list`、5 个工具的调用、stdio 循环、CLI 各子命令 |
 | `tests/powercontext_sdd/test_tools.py` | 分词、glob 语义、路径提取、模型、依赖闭包 |
+| `tests/powercontext_sdd/test_scan.py` | 扫描器：候选产出、草稿状态、失败路径 |
 
 ### 6.2 验证过程中发现并修掉的四个真实缺陷
 

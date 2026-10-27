@@ -112,6 +112,33 @@ class ResolveTest(ProjectTestCase):
         paths = {c.path for c in bundle.code}
         self.assertIn("app/core.py", paths)
 
+    def test_exact_path_mention_does_not_pull_in_same_named_files(self):
+        """规格正文写了完整路径，就只认这一个文件。
+
+        正文里写「app/alpha/cli.py」时，仓库里另一个叫 cli.py 的文件
+        只能算「按文件名匹配」，不能被说成「规格明确要求改动的文件」。
+        """
+        import json
+
+        from tests.powercontext_sdd.helpers import write
+
+        write(self.root / "app" / "alpha" / "cli.py", "VALUE = 1\n")
+        write(self.root / "app" / "beta" / "cli.py", "VALUE = 2\n")
+        data = json.loads(self.context_path.read_text(encoding="utf-8"))
+        for artifact in data["artifacts"]:
+            if artifact["id"] == "SPEC-1":
+                artifact["body"] = "改一下 app/alpha/cli.py 的取值逻辑。"
+        self.context_path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        bundle = resolve(self.store(), Task(text="改一下 cli.py 的取值逻辑"))
+        reasons = {c.path: c.reason for c in bundle.code}
+        self.assertIn("app/alpha/cli.py", reasons)
+        self.assertIn("明确要求改动", reasons["app/alpha/cli.py"])
+        if "app/beta/cli.py" in reasons:
+            self.assertNotIn("明确要求改动", reasons["app/beta/cli.py"])
+
     def test_bundle_serializes(self):
         bundle = resolve(self.store(), Task(text="核心常量取值"))
         data = bundle.to_dict()

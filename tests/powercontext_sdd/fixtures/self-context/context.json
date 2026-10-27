@@ -449,10 +449,10 @@
       "closure": "python",
       "recorded_files": {
         "src/powercontext_sdd/model.py": "55d3e64203a6eaa4a604204a4e8a96dddf3bf0aec35e82b1e550675d91237dce",
-        "src/powercontext_sdd/resolver.py": "4472f3171e6a3c439b13f1b22e3e1094947cec637c1ff83f3b87bae3bc7517aa"
+        "src/powercontext_sdd/resolver.py": "e0d42895412d5ec48ac575d7f712db0fc9a82a6b67b8d8e4ed38dd16fd0221eb"
       },
-      "fingerprint": "ed3b5a032a95dd9c3fabc293a63bc7675b684629d0d0ff108e4393ff4917f7fc",
-      "test_fingerprint": "7f767a9acf2955e9298a702c1ae5c02d119caffdd23cb0503b9c4049020ad67c",
+      "fingerprint": "3d83541d3b310566d33a7faa0ef33f195033202443d901ba5cd52b80cd68f048",
+      "test_fingerprint": "64f428af6d48678e097754d005f3c5d2613e0cd8d19025c2ff932238077a8c4f",
       "recorded_at": "2026-10-27"
     },
     {
@@ -487,9 +487,9 @@
       "recorded_files": {
         "src/powercontext_sdd/deps.py": "e61ca767416f21bcac23b2e925cf2b940c7b9f9a8c0bbcb1aeb77ccc5f0ab30b",
         "src/powercontext_sdd/model.py": "55d3e64203a6eaa4a604204a4e8a96dddf3bf0aec35e82b1e550675d91237dce",
-        "src/powercontext_sdd/resolver.py": "4472f3171e6a3c439b13f1b22e3e1094947cec637c1ff83f3b87bae3bc7517aa"
+        "src/powercontext_sdd/resolver.py": "e0d42895412d5ec48ac575d7f712db0fc9a82a6b67b8d8e4ed38dd16fd0221eb"
       },
-      "fingerprint": "f00b99db49713c9e9f7d7faa17860103eac008abe78312cdc664dbda9d64a427",
+      "fingerprint": "11381273bf3a9d3862879394b29d0bba995eb871def116c4a524a5c745f1fbf4",
       "test_fingerprint": "67a49f4ad5033813531187d6e200b8aaf200b0ca7ab54ed1659b3b5f13109285",
       "recorded_at": "2026-10-27"
     },

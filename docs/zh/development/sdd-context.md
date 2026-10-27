@@ -13,7 +13,7 @@
 | `src/powercontext_sdd/` | 核心引擎（零第三方依赖，只用标准库） |
 | `src/powercontext/builtin/artifacts/sdd/` | 与其他制品族并列的入口 |
 | `src/powercontext/builtin/runtime/sdd.py` | 宿主服务可直接调用的公开 API |
-| `tests/powercontext_sdd/` | 68 个单元测试 + 固定数据 |
+| `tests/powercontext_sdd/` | 69 个单元测试 + 固定数据 |
 | `examples/sdd-context-manager/` | 可运行的示例工程与端到端演示 |
 
 **在仓库根目录跑命令时**，包在 `src/` 下，需要先把 `src` 放进 `PYTHONPATH`：
@@ -121,7 +121,7 @@ src/
     ├── cli.py                      命令行入口
     └── mcp_server.py               MCP stdio 服务端
 tests/
-└── powercontext_sdd/               ← 68 个单元测试
+└── powercontext_sdd/               ← 69 个单元测试
     ├── fixtures/
     │   ├── self-context/           本仓库自身的真实上下文（22 条制品 + 7 条真实指纹基线）
     │   ├── miniob-context/         基于 miniob 真实文档的种子上下文
@@ -190,7 +190,7 @@ python -m powercontext_sdd mcp --context <dir>
 
 | 项目 | 结果 |
 |---|---|
-| 单元测试 | `Ran 68 tests … OK` |
+| 单元测试 | `Ran 69 tests … OK` |
 | 端到端演示 | `18/18 项通过` |
 | 示例工程单测 | `10/10 OK` |
 | 第三方依赖 | 0 |
