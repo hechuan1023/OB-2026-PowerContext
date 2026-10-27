@@ -126,6 +126,7 @@ make test
 - [管理上下文](https://powercontext.oceanbase.io/zh/docs/workflows/)
 - [部署与运维](https://powercontext.oceanbase.io/zh/docs/operate/)
 - [开发与 API](https://powercontext.oceanbase.io/zh/docs/develop/)
+- [SDD 上下文模块（规格驱动的工程上下文管理）](docs/zh/development/sdd-context.md)
 
 PowerContext 是 [PowerMem](https://www.powermem.ai/) 的后续项目。
 

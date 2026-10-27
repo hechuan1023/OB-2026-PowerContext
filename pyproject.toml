@@ -159,7 +159,7 @@ build-backend = "hatchling.build"
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/powercontext", "src/powercontext_service_bootstrap"]
+packages = ["src/powercontext", "src/powercontext_service_bootstrap", "src/powercontext_sdd"]
 
 [tool.ty.environment]
 python = "./.venv"

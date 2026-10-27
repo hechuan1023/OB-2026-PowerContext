@@ -1,0 +1,424 @@
+# 设计说明：SDD 上下文管理器
+
+本文说明模块内部的数据模型、判定规则和算法。所有规则都是**确定性**的——
+同样的输入永远得到同样的输出，因为「有效性判断」如果依赖模型临场发挥，
+就没有审计价值，也无法证明效果。
+
+---
+
+## 1. 总览
+
+```
+                      context.json
+                           │
+                    ┌──────▼──────┐
+                    │  store.py   │  装载制品 / 扫描代码 / 内容指纹
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐
+                    │ resolver.py │  ★ 核心：有效性、冲突、相关性、验证状态
+                    └──┬────┬────┬┘
+                       │    │    │
+          ┌────────────┘    │    └────────────┐
+   ┌───────▼──────┐  ┌──────▼──────┐  ┌──────▼──────┐
+   │ handover.py  │  │  render.py  │  │   deps.py    │
+   │ 跨会话快照   │  │ 渲染成提示词│  │ import 闭包 │
+   └──────────────┘  └─────────────┘  └─────────────┘
+          │                │                │
+   ┌──────▼──────┐  ┌──────▼──────┐  ┌──────▼──────┐
+   │   cli.py    │  │mcp_server.py│  │ baseline.py │
+   │  命令行     │  │  MCP 服务端 │  │  指纹基线   │
+   └─────────────┘  └─────────────┘  └─────────────┘
+```
+
+**设计上的两个关键选择：**
+
+1. **用内容哈希而不是 git commit 判断「代码变没变」。**
+   很多工程交付时并不带 `.git` 目录（打包、拷贝、内网镜像、评测机拉源码）。
+   「文件内容变了没有」用 sha256 在任何环境下都成立，git 做不到这一点。
+
+2. **把时效判断放在程序里，而不是提示词里。**
+   如果让模型自己判断「这条文档是不是过期了」，同样的输入会得到不同的答案，
+   而且无法证明它判对了。本模块把「过期」变成可复现、可测试、可解释的计算。
+
+---
+
+## 2. 数据模型
+
+### 2.1 制品（Artifact）
+
+`src/powercontext_sdd/model.py` 里的 `Artifact` 是所有工程知识的统一载体。
+用**一个类 + 一个 `extra` 字典**而不是五个子类，是因为不同类型的字段差异很小，
+拆成继承体系反而让「从 JSON 装载」这条路径变复杂。
+
+| 字段 | 类型 | 作用 |
+|---|---|---|
+| `id` | str | 唯一标识，取代关系靠它引用 |
+| `kind` | `ArtifactKind` | `spec` / `contract` / `decision` / `verification` / `code` |
+| `title` / `summary` / `body` | str | 参与相关性打分；body 里的路径会被识别为「明确要求改动的文件」 |
+| `status` | `Lifecycle` | 见下 |
+| `version` / `priority` | int | 冲突裁决的第一、第二优先级 |
+| `effective_from` / `updated_at` | str | 冲突裁决的第三、第四优先级 |
+| `supersedes[]` / `superseded_by` | list/str | 取代关系（双向） |
+| `scope[]` | list | 作用范围的 glob |
+| `tags[]` / `keywords[]` | list | 关键词，命中直接提分 |
+| `conflict_key` | str | 同主题标识，同 key 的多条 active 制品会被判为冲突 |
+| `extra` | dict | 各类型专用字段（`targets` / `validates` / `recorded_files` …） |
+
+### 2.2 生命周期
+
+```python
+class Lifecycle(str, enum.Enum):
+    DRAFT = "draft"          # 草稿，不构成约束
+    ACTIVE = "active"        # 生效中 —— 唯一有效的状态
+    DEPRECATED = "deprecated"  # 已废弃，但没人明确说由谁取代
+    SUPERSEDED = "superseded"  # 被明确取代
+    REJECTED = "rejected"    # 被否决
+
+EFFECTIVE_STATUSES = (Lifecycle.ACTIVE,)
+```
+
+**只有 `active` 有效。** 这是整个模块的地基，所有下游判断都基于它。
+
+### 2.3 上下文包（ContextBundle）
+
+`resolve()` 的返回值，是模块的最终产品形态：
+
+| 字段 | 含义 |
+|---|---|
+| `specs` / `contracts` / `decisions` | 当前任务应当遵守的制品 |
+| `invalidated` | 与任务相关的失效制品（含原因和替代者） |
+| `invalidated_decisions` | 上者中 kind==decision 的部分（题目明确要求「哪些决策已经失效」） |
+| `code` | 相关代码引用（路径 + 命中原因 + 分数） |
+| `verifications` | 先前的验证及其当前效力 |
+| `conflicts` | 互相冲突但都已裁决的要求 |
+| `coverage_gaps` | 没有有效验证兜底的要求 |
+| `warnings` | 人类可读的提醒 |
+
+---
+
+## 3. 有效性判定
+
+`resolver.build_validity(store)` 为每条制品算出 `(effective, reason, replaced_by)`。
+
+### 3.1 判定顺序
+
+后面的理由比前面的更「硬」，所以按这个顺序覆盖：
+
+```
+1. 状态不是 active                      → draft / deprecated / superseded / rejected
+2. 被别的「生效中」制品取代              → superseded
+3. 作用域里的代码已经不存在              → scope_drift
+```
+
+### 3.2 取代链
+
+A→B→C 时：
+
+- A 被 B 取代 → A 失效，`replaced_by = B`
+- B 被 C 取代 → B 失效，`replaced_by = C`
+- A 的 `replaced_by` 经过 `_follow_chain()` **展开到链尾**，即 C
+
+为什么要展开？因为接手的人问「A 被谁取代了」，答案应该是「C（最终生效的那个）」，
+而不是「B（自己也不算数了）」。
+
+链深度上限 `MAX_CHAIN_DEPTH = 16`，防止数据里的环导致死循环。
+
+### 3.3 取代声明要「生效」才算数
+
+如果 ADR-004 处于 `draft`，它声明 `supersedes: ["ADR-003"]`：
+
+- ADR-004 不是 active → **不能**用它去作废 ADR-003
+- ADR-003 **仍然有效**
+- 但要输出一条提醒：「ADR-004 声明被取代，但 ADR-004 目前不是生效状态，因此 ADR-003 仍然约束你」
+
+这条规则在真实项目里非常常见：新决策先写进草稿评审，老决策不可能立刻删。
+如果这里处理错了，AI 助手会在评审期内就丢掉正在生效的约束。
+
+### 3.4 作用域漂移（scope drift）
+
+决策（decision）常常约束具体文件。如果这些文件被删了，这条决策就该失效——
+它描述的实现已经不存在了。
+
+```python
+if artifact.scope and not store.expand(artifact.scope):
+    → effective = False, reason = "scope_drift"
+```
+
+**注意：只对 decision 做这个检查。** 规格和契约的 scope 通常描述「这段功能涉及哪些代码」，
+代码被重构掉不代表需求失效——需求可能还在，只是换了实现。
+
+### 3.5 冲突与裁决
+
+`detect_conflicts()` 把**同时生效**的 spec / contract 按 `conflict_key` 分组。
+没有显式 key 时，用「作用域集合」兜底。
+
+同组内 ≥2 条时，按固定规则排序：
+
+```
+版本号 → 优先级 → 生效日期 → 更新时间
+```
+
+第一条是赢家，其余是输家（`shadowed`）。
+
+**赢家仍然进上下文，输家进「已失效」列表**，并明确写「与 X 冲突且版本较旧，已被覆盖」。
+
+理由：把两条矛盾的规格都丢给模型，模型只能自己猜；明确裁决 + 保留一条，
+是把「选择」这一步从概率行为变成确定性行为。
+
+#### 冲突的相关性过滤
+
+一个工程里可能有好几组冲突。当前任务只关心其中一组。
+`_conflict_relevant()` 要求组内至少一条制品满足：
+
+- 标题/摘要/标签/关键词与任务的重合度 ≥ 0.15，或
+- 它的 scope 覆盖了任务涉及的文件
+
+不相关的冲突不进入输出。**这是「按任务裁剪」的关键**——
+定价任务不该看到支付重试策略的冲突。
+
+---
+
+## 4. 相关性排序
+
+### 4.1 分词
+
+`textutil.tokenize()`：
+
+- ASCII 词：按非字母数字切分，转小写（`bplus_tree` → `bplus`, `tree`）
+- CJK：单字 + 二字组合（`折扣` → `折`, `扣`, `折扣`）
+
+**为什么要 CJK 二字组？**
+中文没有空格，按单字切会把「折扣」和「打折」完全切开，词面匹配就废了。
+加上二字组之后，「折扣」和「打折」仍不同，但「金额单位」和「单位金额」能匹配上，
+覆盖率显著提升。
+
+### 4.2 打分
+
+```python
+score = 0.40 * head        # 标题/摘要/标签/关键词 命中
+      + 0.20 * body        # 正文命中
+      + 0.25 * scope       # 作用域与任务文件相交
+      + 0.15 * keyword     # 关键词原文出现
+```
+
+其中 `overlap_ratio(Q, D) = |Q∩D| / |Q|`（分母是任务词集，
+所以任务里提到但制品里没有的词会拉低分数——这正是我们要的）。
+
+**硬规则两条：**
+
+1. 制品 ID 被任务直接点名 → 分数强制为 1.0
+   （`请按 SPEC-001 实现` → 无论关键词如何都必须带上）
+
+2. **决策的 scope 命中任务文件 → 强制纳入**，哪怕分数很低
+   （`不要在别的地方做这个决定`这种约束，模型不看就一定会犯错）
+
+### 4.3 代码引用排序
+
+`_pick_code()` 分四档：
+
+| 分数 | 来源 |
+|---|---|
+| 1.00 | 任务里点名的文件（显式 `files` 或文本中出现的文件名） |
+| 0.95 | **生效制品正文里明确写到的文件** |
+| 0.60 | 生效制品的 scope 覆盖到的文件 |
+| 0.45 × 重合度 | 文件名与任务文本词面相关 |
+
+0.95 这一档很关键：规格正文里写着「新增词法规则（`src/observer/sql/parser/lex_sql.l`）」，
+那这个文件就比同一 scope 下其它文件更值得先看。**规格点名的文件优先。**
+
+---
+
+## 5. 验证状态机
+
+`evaluate_verification()` 回答「先前这个验证，现在还作不数」。
+
+### 5.1 覆盖范围
+
+一条验证实际覆盖的文件 =
+
+```
+直接目标（targets 的 glob 展开）
+  ∪ import 闭包（当 closure == "python"）
+```
+
+**import 闭包**（`deps.py:dependency_closure`）从目标文件出发做 BFS，
+解析 `from .x import y` 和 `import x`，把传递依赖全部纳入。
+
+这是「间接依赖漂移」能被发现的唯一机制。举例：
+
+```
+examples/sdd-context-manager/sample-app/tests/test_order.py  →  app/order.py  →  app/pricing.py
+```
+
+改了 `app/pricing.py`，`app/order.py` 一个字节都没动，
+但 `test_order.py` 的结论已经作废。只做文件级 diff 会漏掉。
+
+> 当前实现只解析 Python 的 import。对 C++ / Java 等语言，
+> 可以用同样的 BFS 框架加各自的 include/import 解析。
+
+### 5.2 判定顺序
+
+按「致命程度」排：
+
+| 顺序 | 状态 | 含义 | 触发条件 |
+|---|---|---|---|
+| 1 | `superseded_spec` | 结论的前提没了 | 它验证的规格/契约**全部**已失效 |
+| 2 | `orphan` | 被测代码不存在了 | targets 展开后为空 |
+| 3 | `unknown` | 判断不了 | 没有基线（既无 `recorded_files` 也无 `fingerprint`） |
+| 4 | `stale_code` | 被测代码改过 | 覆盖范围内 changed / added / missing / detached |
+| 5 | `stale_test` | 测试自身改过 | 测试文件的 sha256 与基线不符 |
+| 6 | `valid` | 以上都没发生 | — |
+
+**几个容易写错的点，及其处理：**
+
+**(a) `unknown` 必须排在漂移检查之前。**
+否则「当前覆盖集合里的文件」会被当成「新增的文件」，
+一个没有基线的验证会误报成 `stale_code`。**宁可说「判断不了」，也不猜。**
+
+**(b) 规格只失效了一部分时，不判 `superseded_spec`。**
+
+如果一条验证同时验证了 SPEC-A 和 SPEC-B，A 死了 B 还活着，
+那这条测试可能已经跟着新规格一起更新过了——应该继续检查代码漂移，
+并在详情里说明「你现在是在验证 B，而不是 A」。
+
+**(c) `diff_against` 必须传 `scope`。**
+
+```python
+diff = store.diff_against(recorded, current_scope)
+```
+
+不传 scope 的话，「仓库里多了一个文件」会被误判成「这段代码变了」。
+四类差异的定义：
+
+| 类别 | 定义 |
+|---|---|
+| `changed` | 在覆盖范围内，内容变了 |
+| `added` | 在覆盖范围内，当时不存在（新增文件或新增依赖） |
+| `missing` | 当时有，现在文件没了 |
+| `detached` | 当时有，现在不再属于覆盖范围（依赖关系变了） |
+
+**(d) `stale_test` 排在 `stale_code` 之后。**
+先说代码变了（更根本），再说测试自身也变了。
+
+### 5.3 覆盖缺口
+
+一条生效的规格，如果没有任何 `valid` 的验证覆盖它，就是一个**覆盖缺口**：
+
+```python
+bundle.coverage_gaps.append(CoverageGap(artifact=spec, reason="没有任何验证覆盖"))
+```
+
+如果相关验证只是失效了，理由会写清楚是哪一个：
+「相关验证已失效（VERIFY-001）」。
+
+这直接对应题目里的「提供当前有效的规格、相关代码和测试」——
+不只是给规格，还要说清楚**哪些规格没有测试兜底**。
+
+---
+
+## 6. 跨会话交接
+
+### 6.1 为什么不是导出文本
+
+交接的难点不是「把上下文传过去」，而是「**传过去的东西可能已经过期了**」。
+
+所以导出的是一份**带指纹的快照**：
+
+```json
+{
+  "snapshot_id": "2d75517318e0c327",
+  "artifacts": {
+    "SPEC-001": {"version": 2, "status": "active", "effective": true, "scope": [...]}
+  },
+  "verifications": {
+    "VERIFY-001": {"state": "valid", "recorded_files": {"app/pricing.py": "<sha256>"}}
+  },
+  "code_fingerprint": "<聚合指纹>",
+  "covered_files": [...],
+  "notes": "...", "open_questions": [...], "decisions_made": [...]
+}
+```
+
+### 6.2 回查
+
+导入快照时逐条比对当前状态，产出过期清单：
+
+| 过期类型 | 触发条件 |
+|---|---|
+| `artifact_removed` | 快照里的制品在当前工程里不存在了 |
+| `superseded` | 制品已失效（并指出被谁取代） |
+| `version_changed` | 版本号变了 |
+| `status_changed` | 状态变了 |
+| `verification_stale` | 快照时成立的验证，现在不成立了 |
+| `code_changed` | 快照之后代码有变动 |
+
+**这是「跨会话和任务交接」这个题目要求的直接答案。**
+
+---
+
+## 7. 指纹基线
+
+`baseline.refresh_baseline()` 给每条 verification 写入：
+
+| 字段 | 内容 |
+|---|---|
+| `recorded_files` | {相对路径: sha256} —— 覆盖范围内的每个文件 |
+| `fingerprint` | 覆盖范围的聚合指纹（`sha256("path:hash\n"...)`） |
+| `test_fingerprint` | 测试文件自身的 sha256 |
+| `recorded_at` | 记录时间 |
+
+**必须由人在「确认代码是好的」之后执行。** 基线的语义是
+「在这个时间点，这些代码通过了这些验证」。如果代码本身就是错的，
+基线会把错误结论固化下来，之后每次都报「有效」。
+
+所以 `scan` 出来的制品一律是 `draft`：**扫描是猜的，让猜测直接约束 AI 助手是危险的。**
+
+---
+
+## 8. 为什么不依赖 git、不依赖第三方库
+
+| 选择 | 原因 |
+|---|---|
+| 内容哈希而非 git commit | 交付物经常不带 `.git`；「内容变了没有」用 sha256 在任何环境都成立 |
+| 零第三方依赖 | 评测机不保证有 pip 网络。`git clone` 下来就能跑，是基本功 |
+| 手写 MCP 服务端 | MCP 协议就是「stdin 一行 JSON、stdout 一行 JSON」，用标准库几十行就够，不必为一个协议引入依赖 |
+
+代价是 **Python 的 import 解析只覆盖了常见写法**（`from .x import y` / `import x`），
+C++ / Java 等语言需要扩展 `deps.py` 里的解析器。这是已知的边界，不是遗漏。
+
+---
+
+## 9. 可复现性
+
+所有输出都是确定性的：
+
+- 排序全部显式指定（不依赖 dict 的插入顺序）
+- 裁决规则是写死的比较链
+- 指纹用 sha256（跨平台一致）
+- 没有任何随机性、没有任何模型调用
+
+同一个 `context.json` + 同一份代码 + 同一个任务描述，**永远得到同样的输出**。
+这让模块的结论可以被评审、被断言、被写进回归测试。
+
+---
+
+## 10. 关键实现位置速查
+
+| 想改什么 | 去哪里 |
+|---|---|
+| 加一种制品类型 | `model.py` 的 `ArtifactKind` + `resolver.py` 的 `pick()` 分支 |
+| 改冲突裁决规则 | `resolver.py:detect_conflicts()` 的 `sorted(key=...)` |
+| 改相关性权重 | `resolver.py:score_artifact()` |
+| 支持新的语言依赖追踪 | `deps.py:imports_of()` |
+| 改 glob 语义 | `textutil.py:glob_to_regex()` |
+| 加一个 MCP 工具 | `mcp_server.py:TOOLS` + `_DISPATCH` + 对应方法 |
+| 加一个 CLI 子命令 | `cli.py:build_parser()` + 对应 `cmd_*` |
+
+---
+
+## 相关文档
+
+- [新手上手指南](新手上手指南.md) — 从零跑通
+- [接入指南](接入指南.md) — 接到 AI 助手里
+- [验证报告](验证报告.md) — 效果证据

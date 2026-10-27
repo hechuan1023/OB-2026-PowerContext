@@ -182,6 +182,12 @@ from powercontext.builtin.runtime.readiness import (
     RuntimeReadinessStatus,
     dependency_readiness_probe,
 )
+from powercontext.builtin.runtime.sdd import (
+    SddContextApplication,
+    SddContextRequest,
+    SddContextResult,
+    resolve_context,
+)
 from powercontext.builtin.statistics import (
     ArtifactInventoryStatistics,
     CandidateFamilyCount,
@@ -334,6 +340,7 @@ __all__ = [
     "RemoteSkillApplication",
     "ResolveExternalSkillRequest",
     "ResolvedUsagePeriod",
+    "resolve_context",
     "RetireMemoryEntryRequest",
     "ReviewApplication",
     "ReviewedCandidate",
@@ -359,6 +366,9 @@ __all__ = [
     "ScopedStatisticsApplication",
     "ScopedTopicMemoryApplication",
     "ScopedWorkApplication",
+    "SddContextApplication",
+    "SddContextRequest",
+    "SddContextResult",
     "SearchMemoryRequest",
     "SearchTopicMemoryRequest",
     "SkillApplication",

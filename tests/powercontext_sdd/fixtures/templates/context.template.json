@@ -1,0 +1,128 @@
+{
+  "project": "改成你的项目名",
+  "code_root": ".",
+  "artifacts": [
+    {
+      "id": "SPEC-001",
+      "kind": "spec",
+      "title": "这里写这条规格的标题（一句话说清它管什么）",
+      "summary": "这里写一两句话的摘要，会参与相关性匹配，写得具体一些",
+      "body": "这里写正文细则。正文里出现的文件路径会被当成「明确要求改动的文件」，\n所以直接把真实路径写进来，例如：\n新增规则时需要同时修改 src/parser/lexer.l 和 src/parser/parser.y。",
+      "status": "active",
+      "version": 1,
+      "priority": 0,
+      "effective_from": "2026-01-01",
+      "updated_at": "2026-01-01",
+      "supersedes": [],
+      "superseded_by": "",
+      "scope": [
+        "src/parser/**"
+      ],
+      "tags": [
+        "parser"
+      ],
+      "keywords": [
+        "词法",
+        "语法"
+      ],
+      "conflict_key": "",
+      "source": "docs/requirements.md"
+    },
+    {
+      "id": "CTR-001",
+      "kind": "contract",
+      "title": "这里写接口契约的标题",
+      "summary": "对外暴露的接口长什么样，谁都不能改坏",
+      "body": "写成契约的字段名 / 报文格式 / 返回值约定。",
+      "status": "active",
+      "version": 1,
+      "priority": 0,
+      "effective_from": "2026-01-01",
+      "updated_at": "2026-01-01",
+      "scope": [
+        "src/net/**"
+      ],
+      "tags": [
+        "api"
+      ],
+      "keywords": [
+        "接口",
+        "协议"
+      ],
+      "conflict_key": "",
+      "source": "docs/api-contract.md"
+    },
+    {
+      "id": "ADR-001",
+      "kind": "decision",
+      "title": "这里写设计决策的标题（做了什么选择）",
+      "summary": "选了什么方案，以及为什么",
+      "body": "决定：……\n理由：……\n影响范围：……",
+      "status": "active",
+      "version": 1,
+      "priority": 0,
+      "effective_from": "2026-01-01",
+      "updated_at": "2026-01-01",
+      "scope": [
+        "src/storage/**"
+      ],
+      "tags": [
+        "storage"
+      ],
+      "keywords": [
+        "存储"
+      ],
+      "conflict_key": "",
+      "source": "docs/adr/0001-xxx.md"
+    },
+    {
+      "id": "VERIFY-001",
+      "kind": "verification",
+      "title": "这里写这条验证证明了什么",
+      "summary": "哪个测试跑通了、覆盖了哪条要求",
+      "status": "active",
+      "version": 1,
+      "scope": [
+        "src/parser/**"
+      ],
+      "tags": [],
+      "keywords": [
+        "测试"
+      ],
+      "validates": [
+        "SPEC-001"
+      ],
+      "targets": [
+        "src/parser/**"
+      ],
+      "test_path": "tests/test_parser.py",
+      "closure": "python",
+      "recorded_files": {},
+      "fingerprint": "",
+      "test_fingerprint": "",
+      "recorded_at": ""
+    }
+  ],
+  "_readme": [
+    "这是一份可以直接改的模板。把每条制品换成你自己项目里的真实内容，然后删掉这一整段 _readme。",
+    "",
+    "必填字段：id、kind、title、status。",
+    "kind 取值：spec / contract / decision / verification。",
+    "status 取值：draft / active / deprecated / superseded / rejected。只有 active 才会约束 AI 助手。",
+    "",
+    "scope 用 glob：`**` 跨目录，`*` 只匹配同层。",
+    "scope 对 decision 特别重要：scope 里的文件全被删了，这条决策会自动失效（scope_drift）。",
+    "⚠️ 所以 scope 必须填你项目里**真实存在**的路径。模板里的 src/parser/** 只是占位，",
+    "   不改的话，那条 ADR-001 一上来就会被判为失效。",
+    "",
+    "conflict_key：给「讲同一件事」的多条制品填相同的值，模块会自动裁决（版本号→优先级→生效日期→更新时间）。",
+    "",
+    "supersedes / superseded_by 是取代关系，两个方向都填上更好。取代链会自动展开到最终生效的那一条。",
+    "",
+    "verification 专用：validates（验证了哪些规格）、targets（被测代码的 glob）、test_path（测试文件）、closure。",
+    "closure 填 \"python\" 表示要追踪 import 闭包（改间接依赖也算验证失效）。",
+    "",
+    "recorded_files / fingerprint / test_fingerprint 不要手填。确认代码是好的之后运行：",
+    "    python -m powercontext_sdd baseline --context context.json --code-root <你的项目根目录>"
+  ]
+}
