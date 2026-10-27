@@ -1,0 +1,100 @@
+{
+  "baseline_commit": "bb71684d95f0bd4798df36c4c67d80d96dff17de",
+  "provenance": "Developer queries and page targets inspected from original financial-report PDFs; no official relevance labels or hidden questions.",
+  "ranking_check": {
+    "queries": 167,
+    "targets": 204,
+    "before": 199,
+    "after": 204,
+    "regressions": []
+  },
+  "improved_cases": [
+    {
+      "question": "How much did PepsiCo repay to lenders and distribute to shareholders in 2022?",
+      "expected": [
+        [
+          "PEPSICO_2022_10K",
+          65
+        ]
+      ],
+      "total": 1,
+      "before": 0,
+      "after": 1
+    },
+    {
+      "question": "How much did PepsiCo contribute to employee retirement plans in 2022?",
+      "expected": [
+        [
+          "PEPSICO_2022_10K",
+          95
+        ]
+      ],
+      "total": 1,
+      "before": 0,
+      "after": 1
+    },
+    {
+      "question": "How much did 3M repay to lenders in 2022?",
+      "expected": [
+        [
+          "3M_2022_10K",
+          52
+        ]
+      ],
+      "total": 1,
+      "before": 0,
+      "after": 1
+    },
+    {
+      "question": "How much did Adobe repay to lenders in 2022?",
+      "expected": [
+        [
+          "ADOBE_2022_10K",
+          57
+        ]
+      ],
+      "total": 1,
+      "before": 0,
+      "after": 1
+    },
+    {
+      "question": "How much did Boeing repay to lenders in 2022?",
+      "expected": [
+        [
+          "BOEING_2022_10K",
+          59
+        ]
+      ],
+      "total": 1,
+      "before": 0,
+      "after": 1
+    }
+  ],
+  "initial_reproductions": [
+    {
+      "question": "How much did PepsiCo repay to lenders and distribute to shareholders in 2022?",
+      "document": "PEPSICO_2022_10K",
+      "physical_page": 65,
+      "before_rank": 479,
+      "after_rank": 4
+    },
+    {
+      "question": "How much did PepsiCo contribute to employee retirement plans in 2022?",
+      "document": "PEPSICO_2022_10K",
+      "physical_page": 95,
+      "before_rank": 254,
+      "after_rank": 3
+    }
+  ],
+  "checks": {
+    "linux_public_acceptance_and_pdf_regressions": "63 passed; Python 3.12, fixed competition image, network disabled, read-only src, 1 CPU and 2 GiB",
+    "new_runtime_regression": "Old source fails the top-20 assertion; candidate passes after Runtime restart and exact citation readback.",
+    "changed_python_files": "ruff and ty passed",
+    "repository_prek": "192 pre-existing diagnostics remain; formatter changes to official assets restored."
+  },
+  "limitations": [
+    "The 167-query comparison isolates the ranking layer using locally extracted original-PDF text. It is not an official quality score or a full-runtime latency measurement.",
+    "Official evidence-text recall, full-page F1 and hidden-query Recall@20 remain unverified.",
+    "The parser was not modified in this change."
+  ]
+}

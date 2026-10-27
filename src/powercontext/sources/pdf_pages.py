@@ -102,6 +102,9 @@ _STOPWORDS = frozenset([
     "why",
     "when",
     "where",
+    "much",
+    "many",
+    "during",
     "do",
     "does",
     "did",
@@ -248,6 +251,14 @@ _NOTE_CONCEPTS = (
         ("legal proceedings", "contingencies", "litigation"),
     ),
     (r"\b(?:geograph\w*|territories|regions)\b", ("geographic", "reportable segments", "countries", "operations")),
+    (
+        r"\b(?:repay(?:s|ing|ment|ments)?|repaid|lenders?)\b",
+        ("debt repayments", "payments of debt", "borrowings", "financing activities"),
+    ),
+    (
+        r"\b(?:pensions?|retirement (?:plans?|benefits?))\b",
+        ("pension", "postretirement", "retiree medical", "benefit plans"),
+    ),
 )
 _NOTE_PATTERNS = tuple((re.compile(pattern), phrases) for pattern, phrases in _NOTE_CONCEPTS)
 
@@ -563,8 +574,10 @@ def _stem(word: str) -> str:
         "decreas",
         "reduc",
         "declin",
+        "contribut",
+        "distribut",
     ):
-        if word.startswith(root) and word[len(root) :] in {"e", "ed", "es", "ing", "ation", "ations"}:
+        if word.startswith(root) and word[len(root) :] in {"e", "ed", "es", "ing", "ion", "ions", "ation", "ations"}:
             return root
     if len(word) > 5 and word.endswith("ies"):
         return word[:-3] + "y"

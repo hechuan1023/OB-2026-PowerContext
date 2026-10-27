@@ -1000,3 +1000,59 @@ def test_balance_sheet_continuation_without_repeated_title(tmp_path: Path) -> No
             assert returned == {1, 2}
 
     asyncio.run(run())
+
+
+def test_financing_and_pension_paraphrases_recall_exact_pages_after_restart(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'paraphrases.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        bodies = [
+            "Consolidated Statement of Cash Flows\nFinancing activities\n"
+            "Payments of long-term debt 120\nCash dividends paid 45\nBorrowings 80",
+            "Pension and Postretirement Benefit Plans\nFunding\n"
+            "Contributions to pension and retiree medical plans\n2031 2030\nDiscretionary 25 18\nRequired 10 9",
+        ]
+        for index in range(25):
+            bodies.extend([
+                f"Agreement {index}\nLenders distribute notices to shareholders and lenders repay advances. " * 5,
+                f"Guide {index}\nEmployee retirement plans cover employee retirement plans and staff eligibility. " * 5,
+            ])
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Paraphrases", summary="Financial disclosures", idempotency_key="paraphrases")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, body in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(
+                        document_id="LARCHBROOK_2031_10K", document_sha256="a" * 64, page_number=number, text=body
+                    )
+                )
+                locations[source.name] = number
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            for expected, question in (
+                (1, "How much did Larchbrook repay to lenders during 2031?"),
+                (2, "How much did Larchbrook contribute to employee retirement plans during 2031?"),
+            ):
+                citations = await search_pdf_pages(memory, question, 20)
+                returned = []
+                for citation in citations:
+                    entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                    number = locations[entry.sources[0].source_id]
+                    assert entry.text == f"LARCHBROOK_2031_10K\n{bodies[number - 1]}".strip()
+                    returned.append(number)
+                assert len(returned) == len(set(returned)) == 20
+                assert expected in returned
+
+    asyncio.run(run())
