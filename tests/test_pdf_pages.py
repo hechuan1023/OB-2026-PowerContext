@@ -83,6 +83,42 @@ def _document(password: str | None = None) -> bytes:
     return output.getvalue()
 
 
+@pytest.mark.parametrize("rotated", [False, True])
+def test_narrow_font_spacing_keeps_words_numbers_and_rotated_text(rotated: bool) -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=600, height=400)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+        NameObject("/FirstChar"): NumberObject(32),
+        NameObject("/LastChar"): NumberObject(126),
+        NameObject("/Widths"): ArrayObject([NumberObject(200)] + [NumberObject(600)] * 94),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})
+    })
+    stream = DecodedStreamObject()
+    content = (
+        b"BT /F1 12 Tf 30 300 Td [(R) -100 (e) -100 (v) -100 (e) -100 (n) -100 (u) -100 (e)"
+        b" ( 1234.50 987.25 A B C D)] TJ ET"
+    )
+    if rotated:
+        content += b" BT /F1 10 Tf 0 1 -1 0 550 20 Tm (Side note 42) Tj ET"
+    stream.set_data(content)
+    page.replace_contents(stream.flate_encode())
+    writer.add_blank_page(width=600, height=400)
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="Narrow-space-font", content=output.getvalue()))
+    assert len(pages) == 2
+    assert "Revenue" in pages[0].text
+    assert "1234.50 987.25 A B C D" in pages[0].text
+    if rotated:
+        assert "Side note 42" in pages[0].text
+    assert pages[1].text == ""
+
+
 def test_all_text_and_blank_pages_keep_exact_physical_provenance() -> None:
     content = _document()
     pages = parse_pdf_document(PDFDocumentInput(document_id="原始/报告:2025", content=content))
@@ -550,5 +586,59 @@ def test_note_paraphrases_and_document_comparisons_after_restart(tmp_path: Path)
                     returned.append(number)
                 assert len(returned) == len(set(returned))
                 assert expected <= set(returned), question
+
+    asyncio.run(run())
+
+
+def test_repeated_tables_do_not_displace_distinct_narrative_evidence(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'coverage.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        bodies = (
+            "Consolidated Statement of Income\nRevenue 500. Operating profit 85. Net income 60.",
+            *(
+                f"Statement of Income\nSubsidiary {number}\nRevenue 20. Operating profit 4. Net income 3. "
+                "Restructuring charges are included in operating profit."
+                for number in range(25)
+            ),
+            "Management discussion\nRestructuring charges of 125 were recognized during the year. "
+            "The plant closure program was the principal reason for the decline in operating profit.",
+        )
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Coverage", summary="Evidence", idempotency_key="coverage")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, body in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id="RIVERTON_2030", document_sha256="d" * 64, page_number=number, text=body)
+                )
+                locations[source.name] = number
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            question = "What restructuring costs affected Riverton operating profit in 2030?"
+            citations = await search_pdf_pages(memory, question, 20)
+            returned = []
+            for citation in citations:
+                entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                number = locations[entry.sources[0].source_id]
+                assert entry.text == f"RIVERTON_2030\n{bodies[number - 1]}"
+                returned.append(number)
+            assert len(returned) == len(set(returned)) == 20
+            assert {1, 27} <= set(returned)
+            assert await search_pdf_pages(memory, question, 20) == citations
+            # Similar pages are deferred, not deleted: a larger budget can
+            # still retrieve each distinct physical page.
+            assert len(await search_pdf_pages(memory, question, 40)) == 27
 
     asyncio.run(run())

@@ -25,7 +25,7 @@ from hashlib import sha256
 from typing import Any
 
 from pydantic import BaseModel, Field, StrictBytes, StrictInt, StrictStr, field_validator
-from pypdf import PdfReader, get_configuration
+from pypdf import PageObject, PdfReader, get_configuration
 from pypdf.generic import (
     ArrayObject,
     ContentStream,
@@ -416,6 +416,38 @@ def _validate_page_content(page: DictionaryObject, reader: PdfReader) -> None:
         pending.extend(_validate_content_resources(stream, resources))
 
 
+def _fragmented_letters(text: str) -> int:
+    return sum(
+        len(match.group().split()) for match in re.finditer(r"(?<!\w)[A-Za-z](?:[ \t]+[A-Za-z]){3,}(?!\w)", text)
+    )
+
+
+def _extract_page_text(page: PageObject) -> str:
+    text = page.extract_text() or ""
+    fragments = _fragmented_letters(text)
+    if fragments:
+        # Narrow font-space metrics can make plain extraction split every letter.
+        # Reconstruct spacing from glyph positions, retaining rotated text and
+        # accepting the alternative only when every non-whitespace character survives.
+        layout = page.extract_text(extraction_mode="layout", layout_mode_strip_rotated=False)
+        if _fragmented_letters(layout) < fragments and Counter(re.sub(r"\s", "", layout)) == Counter(
+            re.sub(r"\s", "", text)
+        ):
+            text = layout
+        else:
+            # Layout mode may omit graph labels or overlapping text. In that
+            # case preserve the original page and repair only sequences for
+            # which layout provides an unambiguous, character-identical span.
+            def restore_spacing(match: re.Match[str]) -> str:
+                characters = re.sub(r"\s", "", match.group())
+                pattern = r"(?<!\w)" + r"\s*".join(re.escape(char) for char in characters) + r"(?!\w)"
+                alternatives = {" ".join(span.split()) for span in re.findall(pattern, layout)}
+                return alternatives.pop() if len(alternatives) == 1 else match.group()
+
+            text = re.sub(r"(?<!\w)[A-Za-z0-9](?:[ \t]+[A-Za-z0-9]){3,}(?!\w)", restore_spacing, text)
+    return text if text.strip() else ""
+
+
 def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
     """Extract every page, returning nothing until the complete input succeeds."""
 
@@ -430,7 +462,7 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
         pages = []
         for number, page in enumerate(reader.pages, start=1):
             _validate_page_content(page, reader)
-            text = page.extract_text() or ""
+            text = _extract_page_text(page)
             pages.append(
                 PDFPageInput(
                     document_id=value.document_id,
@@ -751,9 +783,49 @@ def _expand_document_terms(hits: list[MemoryHit], question: str, weights: dict[s
             if expansion <= question_terms:
                 weights[abbreviation] = max(weights.get(abbreviation, 0.0), 1.0)
             elif abbreviation in question_terms:
-                for term in expansion:
+                for term in sorted(expansion):
                     weights[term] = max(weights.get(term, 0.0), 0.7)
     return weights
+
+
+def _diverse_pages(scores: list[tuple[float, MemoryHit]], anchors: list[MemoryHit], limit: int) -> list[MemoryHit]:
+    """Reduce redundant pages in the result budget without dropping identities.
+
+    Similar subsidiary tables or repeated contract language can otherwise fill
+    the entire top-k. Penalize overlap within one document, leaving cross-report
+    comparisons intact. Numeric differences do not make boilerplate novel.
+    """
+
+    features = [
+        frozenset(
+            _stem(word)
+            for word in _WORDS.findall(hit.text.partition("\n")[2].casefold())
+            if not word.isdigit() and word not in _STOPWORDS
+        )
+        for _, hit in scores
+    ]
+    documents = [_document_name(hit) for _, hit in scores]
+    chosen = [index for index, (_, hit) in enumerate(scores) if hit in anchors]
+    # Preserve the order of complementary statement anchors.
+    chosen.sort(key=lambda index: anchors.index(scores[index][1]))
+    remaining = set(range(len(scores))) - set(chosen)
+    redundancy = [0.0] * len(scores)
+    pending = list(chosen)
+    while remaining and len(chosen) < limit:
+        for selected in pending:
+            for index in remaining:
+                if documents[index] == documents[selected]:
+                    union = features[index] | features[selected]
+                    similarity = len(features[index] & features[selected]) / len(union) if union else 0.0
+                    # Related evidence pages legitimately share terminology.
+                    # Penalize only near-duplicate vocabulary, not topic overlap.
+                    overlap = max(0.0, (similarity - 0.6) / 0.4)
+                    redundancy[index] = max(redundancy[index], overlap)
+        best = max(remaining, key=lambda index: (scores[index][0] * (1.0 - 0.7 * redundancy[index]), -index))
+        chosen.append(best)
+        remaining.remove(best)
+        pending = [best]
+    return [scores[index][1] for index in chosen] + [scores[index][1] for index in sorted(remaining)]
 
 
 def _rank_pages(
@@ -762,6 +834,7 @@ def _rank_pages(
     weights: dict[str, float],
     phrases: tuple[str, ...],
     votes: dict[tuple[str, str, str], float],
+    limit: int = 20,
 ) -> list[MemoryHit]:
     if not hits:
         return []
@@ -796,8 +869,9 @@ def _rank_pages(
         phrase_score = sum(0.8 for phrase in phrases if phrase in compact_body)
         identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
         titles[identity] = {kind: _statement_title_quality(body, kind) for kind in statement_kinds}
-        statement_score = 8.0 * sum(bool(quality) for quality in titles[identity].values())
-        score = (score + phrase_score + statement_score) * (1.0 + 0.5 * entity_overlap) + 4.0 * votes.get(identity, 0.0)
+        # Main statements have a small reserved set below. Giving every table
+        # title a bonus would crowd out equally valid narrative/notes evidence.
+        score = (score + phrase_score) * (1.0 + 0.5 * entity_overlap) + 4.0 * votes.get(identity, 0.0)
         scores.append((score, hit))
     scores.sort(key=lambda item: (-item[0], item[1].memory_ref.artifact_id, item[1].entry_id))
     ranked = [hit for _, hit in scores]
@@ -814,7 +888,7 @@ def _rank_pages(
             )
             if best not in anchors:
                 anchors.append(best)
-    return anchors + [hit for hit in ranked if hit not in anchors]
+    return _diverse_pages(scores, anchors, limit)
 
 
 async def _page_candidates(
@@ -860,7 +934,7 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
     candidates, votes = await _page_candidates(memory, question, searches, limit)
     citations: list[MemoryCitation] = []
     seen: set[tuple[str, str]] = set()
-    for hit in _rank_pages(candidates, question, weights, phrases, votes):
+    for hit in _rank_pages(candidates, question, weights, phrases, votes, limit):
         citation = MemoryCitation(
             memory_ref=hit.memory_ref, entry_id=hit.entry_id, entry_version_id=hit.entry_version_id
         )
