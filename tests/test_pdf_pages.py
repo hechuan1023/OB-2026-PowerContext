@@ -991,6 +991,59 @@ def test_note_paraphrases_and_document_comparisons_after_restart(tmp_path: Path)
     asyncio.run(run())
 
 
+def test_financial_note_paraphrases_retrieve_accounting_terms_after_restart(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'note-terms.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        bodies = (
+            "Supplier financing arrangements. Accounts payable to suppliers using third-party services were 500. "
+            "Obligations remain due to suppliers, not financing institutions.",
+            "Redeemable noncontrolling interests. The co-investor can exercise an annual put option. "
+            "Redemption value 200. The interest is measured at fair value.",
+            "Foreign tax loss carryforwards do not expire. Undistributed earnings were permanently reinvested. "
+            "No deferred tax liability was recognized.",
+            "Restructuring accrual. Liability at beginning 40. Charges 20. Cash payments 15. Liability at end 45.",
+            "Vendor events and minority market share. Our business handles orders and invoices. "
+            "We hold supplier conferences and plan to buy and sell products in future years.",
+            "Cash and debt financing. Spending may increase future profits. The company has foreign operations "
+            "and pays taxes on income. Business plans may result in losses in some markets.",
+        )
+        source_ids = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Notes", summary="Accounting evidence", idempotency_key="note-terms")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, body in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id="BRIAR_2035", document_sha256="c" * 64, page_number=number, text=body)
+                )
+                source_ids[number] = source.name
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            while (await runtime.memory.for_scope(scope.scope_id).flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            for question, expected in (
+                ("How much did Briar owe vendors using early payment services?", 1),
+                ("What was the value of the minority holding that Briar could be forced to buy back?", 2),
+                ("Which overseas losses can Briar use against future taxes without a deadline?", 3),
+                ("How much of the amount set aside by Briar was still unpaid at year end?", 4),
+            ):
+                citations = await search_pdf_pages(memory, question, limit=1)
+                assert len(citations) == 1
+                entry = (await memory.get(GetMemoryEntryRequest(citation=citations[0]))).entry
+                assert entry.sources[0].source_id == source_ids[expected], question
+                assert entry.text == f"BRIAR_2035\n{bodies[expected - 1]}"
+
+    asyncio.run(run())
+
+
 def test_repeated_tables_do_not_displace_distinct_narrative_evidence(tmp_path: Path) -> None:
     async def run() -> None:
         config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'coverage.db'}"))

@@ -240,6 +240,27 @@ _METRIC_PATTERNS = tuple((re.compile(pattern), phrases, kinds) for pattern, phra
 # natural-language questions reach notes whose wording differs from the query.
 _NOTE_CONCEPTS = (
     (
+        r"\b(?:vendors?|suppliers?|trade creditors?)\b",
+        ("suppliers", "accounts payable", "trade payables"),
+    ),
+    (
+        r"\b(?:minority|non ?controlling)\s+(?:interests?|holdings?|stakes?)\b",
+        ("noncontrolling interests",),
+    ),
+    (
+        r"\b(?:put (?:options?|rights?)|redeemable interests?|redemption value|sell back|"
+        r"(?:forced|obliged|required) to buy)\b",
+        ("redeemable interest", "redemption value", "put option"),
+    ),
+    (
+        r"\b(?:accruals?|provisions?|amounts? set aside)\b",
+        ("accrual", "liability", "provision", "reserve"),
+    ),
+    (
+        r"\b(?:tax losses|loss carryforwards?|loss(?:es)?(?=.{0,120}\b(?:future taxes|taxable income)\b))\b",
+        ("loss carryforwards", "net operating losses"),
+    ),
+    (
         r"\b(?:compensation|remuneration|awards?|(?:stock|share|equity)\s+grants?)\b",
         ("compensation", "stock based awards", "share based payments"),
     ),
@@ -584,6 +605,8 @@ def _stem(word: str) -> str:
             return root
     if len(word) > 5 and word.endswith("ies"):
         return word[:-3] + "y"
+    if len(word) > 4 and word.endswith("sses"):
+        return word[:-2]
     if len(word) > 4 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
         return word[:-1]
     return word
