@@ -163,7 +163,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     result = scan_repository(args.code_root)
     target = Path(args.out)
     target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("w", encoding="utf-8") as handle:
+    with target.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(result, handle, ensure_ascii=False, indent=2)
 
     stats = result["stats"]

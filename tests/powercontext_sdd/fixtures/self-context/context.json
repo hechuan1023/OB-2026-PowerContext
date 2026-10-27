@@ -452,7 +452,7 @@
         "src/powercontext_sdd/resolver.py": "4472f3171e6a3c439b13f1b22e3e1094947cec637c1ff83f3b87bae3bc7517aa"
       },
       "fingerprint": "ed3b5a032a95dd9c3fabc293a63bc7675b684629d0d0ff108e4393ff4917f7fc",
-      "test_fingerprint": "40709230d756fc44698cadb3f555417ad8baf1eab0c8c2861bd50829d5d31d94",
+      "test_fingerprint": "7f767a9acf2955e9298a702c1ae5c02d119caffdd23cb0503b9c4049020ad67c",
       "recorded_at": "2026-10-27"
     },
     {
@@ -490,7 +490,7 @@
         "src/powercontext_sdd/resolver.py": "4472f3171e6a3c439b13f1b22e3e1094947cec637c1ff83f3b87bae3bc7517aa"
       },
       "fingerprint": "f00b99db49713c9e9f7d7faa17860103eac008abe78312cdc664dbda9d64a427",
-      "test_fingerprint": "67e6e2946742c9ec8e33eba06ca273f0e96410cd6f1eee787ef62e4769651850",
+      "test_fingerprint": "67a49f4ad5033813531187d6e200b8aaf200b0ca7ab54ed1659b3b5f13109285",
       "recorded_at": "2026-10-27"
     },
     {
@@ -520,10 +520,10 @@
       "test_path": "tests/powercontext_sdd/test_handover.py",
       "closure": "python",
       "recorded_files": {
-        "src/powercontext_sdd/handover.py": "8a94aa5510cbe554103be2ab013005119d5fa7913542607e6ac9ee7cbd657859"
+        "src/powercontext_sdd/handover.py": "8cde0a63233482ae876a99f1af92f97329f5008922c46fec047f0afda29afde6"
       },
-      "fingerprint": "f9badc1d13675a0d6d3076d6cb3dbd674a9ebc9a4939f6753099aad54998ad8d",
-      "test_fingerprint": "f3a3fea101fada669f719e0af7b20a8fdb3f34eb945bb84dddb7ce8d2577edee",
+      "fingerprint": "cfe303df34d42ca9b3ef01c2e1d6a88822c881263b286327e115855f68fba228",
+      "test_fingerprint": "d29e23bf885b5003938e0c1a68f0a310449e90b8269f516745d031faea4fe762",
       "recorded_at": "2026-10-27"
     },
     {
@@ -556,12 +556,12 @@
       "test_path": "tests/powercontext_sdd/test_mcp_and_cli.py",
       "closure": "python",
       "recorded_files": {
-        "src/powercontext_sdd/cli.py": "8340c768c22393daacde2bd0d07c7d788b412558ebafd3ed19aa47ec2dfbbafc",
-        "src/powercontext_sdd/mcp_server.py": "03c5435cf609a8defca3328b988ff76747a0fc0ae1907a62164936329cfd3019",
+        "src/powercontext_sdd/cli.py": "fcfb65fe9e25d8d8048b4c5507be30f9652d72220aa4a7ccd5d273c37f1cbd9c",
+        "src/powercontext_sdd/mcp_server.py": "b6fe65d35631cdd9752a8d8887d4c577f8c07260fbcfc16fe8076ae84cbe1309",
         "src/powercontext_sdd/scan.py": "d9ad30b0e41ffbe02fdbc4c99cbd621b33e86aa870fefb78ace1d3046bc6242d"
       },
-      "fingerprint": "5bb248344c350eb20dcb0da268ba258cbaa8ec2bdfcfd596eb5ebfcf932c26b3",
-      "test_fingerprint": "22c5fc656419c9f2eec523d8347272c708b572006dc678f8e4eb302b610f0afa",
+      "fingerprint": "87e8f071cad535dbe49f765df47afb0596f5d896c5b90765539c2804b83aa9f8",
+      "test_fingerprint": "159ccd9ec5a8ec4530d47695ee69af4e18f6d10b7e759256d3025713c334ccb9",
       "recorded_at": "2026-10-27"
     },
     {
@@ -600,7 +600,7 @@
         "src/powercontext_sdd/textutil.py": "3e4ae13b6eb8dfa32b5bd53985a2e8778c4361ab7476efd46e0f7244df80b167"
       },
       "fingerprint": "40b0f77202497b2ca7619b4f7069e9291a5fc0d18c02e24afe6b77367a5ab9ef",
-      "test_fingerprint": "b4038a5c5cdf478795de308fedb84e37c64b1fec05def601c1ffee1a2a160aef",
+      "test_fingerprint": "feb9550493d018ad74d5e2148de73ad858bb0426d2d2ae171e3471ba3d829ce7",
       "recorded_at": "2026-10-27"
     },
     {

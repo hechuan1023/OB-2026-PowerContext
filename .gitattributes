@@ -9,3 +9,4 @@ src/powercontext/builtin/runtime/sdd.py text eol=lf
 src/powercontext_sdd/** text eol=lf
 tests/powercontext_sdd/** text eol=lf
 examples/sdd-context-manager/** text eol=lf
+docs/zh/development/sdd-context*.md text eol=lf

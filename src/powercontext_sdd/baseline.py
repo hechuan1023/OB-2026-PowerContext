@@ -87,7 +87,7 @@ def refresh_baseline(
         updated.append("%s（覆盖 %d 个文件）" % (artifact.get("id"), len(recorded)))
 
     target_out = Path(out_path).resolve() if out_path else path
-    with target_out.open("w", encoding="utf-8") as handle:
+    with target_out.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(context, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
 

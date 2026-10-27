@@ -139,7 +139,7 @@ def _snapshot_id(snapshot: Dict[str, Any]) -> str:
 def save_snapshot(snapshot: Dict[str, Any], path: str) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("w", encoding="utf-8") as handle:
+    with target.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(snapshot, handle, ensure_ascii=False, indent=2)
     return target
 
