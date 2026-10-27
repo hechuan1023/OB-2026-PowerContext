@@ -1,0 +1,543 @@
+app:
+  description: |
+    深夜便利店 · 会记仇的店员。
+
+    你是凌晨两点还亮着灯的便利店店员。玩家每次来对你说的话，你都记在账本上；
+    下次再来（新会话），你会翻旧账、点名玩家上次干过的事。
+
+    Dify 负责流程编排：收集输入 → 查 PowerContext 旧账 → 取历史上下文 → 生成店员台词 → 写回 PowerContext → 输出。
+    PowerContext 负责跨会话记忆（账本），seekdb 承载 PowerContext 的持久化数据。
+  icon: 🌙
+  icon_background: '#FFEAD5'
+  mode: advanced-chat
+  name: 深夜便利店
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.3.1
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - description: PowerContext Server 的基地址，例如 http://powercontext:8000
+    id: env-pc-base-url
+    name: POWERCONTEXT_BASE_URL
+    selector:
+    - env
+    - POWERCONTEXT_BASE_URL
+    value: http://powercontext:8000
+    value_type: string
+  - description: PowerContext 的 scope_id，由 scripts/init_powercontext.py 创建
+    id: env-pc-scope-id
+    name: POWERCONTEXT_SCOPE_ID
+    selector:
+    - env
+    - POWERCONTEXT_SCOPE_ID
+    value: replace-with-your-scope-id
+    value_type: string
+  features:
+    file_upload: {}
+    opening_statement: 凌晨两点的便利店还亮着灯。填上你的昵称，再说一句想对店员说的话——他什么都会记着。
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions:
+    - 我要一罐汽水
+    - 老板你是不是什么都记得
+    - 对不起，上次那瓶汽水我忘了付钱
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: code
+      id: e-start-build
+      source: start
+      sourceHandle: source
+      target: build_request
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: e-build-search
+      source: build_request
+      sourceHandle: source
+      target: pc_search
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: http-request
+      id: e-search-prepare
+      source: pc_search
+      sourceHandle: source
+      target: pc_prepare
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: llm
+      id: e-prepare-clerk
+      source: pc_prepare
+      sourceHandle: source
+      target: clerk
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: e-clerk-build-remember
+      source: clerk
+      sourceHandle: source
+      target: build_remember
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: http-request
+      id: e-build-remember
+      source: build_remember
+      sourceHandle: source
+      target: pc_remember
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: answer
+      id: e-remember-answer
+      source: pc_remember
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: answer
+      id: e-remember-fallback
+      source: pc_remember
+      sourceHandle: fail-branch
+      target: answer_fallback
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: 顾客进店，填昵称和一句话
+        selected: false
+        title: 进店
+        type: start
+        variables:
+        - label: 你的昵称
+          max_length: 32
+          options: []
+          required: true
+          type: text-input
+          variable: player_id
+        - label: 你要对店员说的话
+          max_length: 800
+          options: []
+          required: true
+          type: paragraph
+          variable: message
+      height: 116
+      id: start
+      position:
+        x: 30
+        y: 280
+      positionAbsolute:
+        x: 30
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: |
+          import json
+
+
+          def _clean(value: str, limit: int) -> str:
+              text = " ".join(str(value or "").split())
+              return text[:limit]
+
+
+          def main(player_id: str, message: str, scope_id: str) -> dict:
+              pid = _clean(player_id, 32) or "无名顾客"
+              msg = _clean(message, 800)
+              scope = _clean(scope_id, 256)
+              search_body = json.dumps(
+                  {"scope_id": scope, "query": pid, "limit": 20},
+                  ensure_ascii=False,
+              )
+              prepare_body = json.dumps(
+                  {"scope_id": scope, "query": f"{pid} {msg}", "max_bytes": 3000},
+                  ensure_ascii=False,
+              )
+              return {
+                  "player_id": pid,
+                  "message": msg,
+                  "search_body": search_body,
+                  "prepare_body": prepare_body,
+              }
+        code_language: python3
+        desc: 清洗输入并生成 PowerContext 请求体（JSON 在代码里拼，避免玩家输入里的引号破坏请求）
+        outputs:
+          player_id:
+            children: null
+            type: string
+          message:
+            children: null
+            type: string
+          search_body:
+            children: null
+            type: string
+          prepare_body:
+            children: null
+            type: string
+        selected: false
+        title: 整理顾客输入
+        type: code
+        variables:
+        - value_selector:
+          - start
+          - player_id
+          variable: player_id
+        - value_selector:
+          - start
+          - message
+          variable: message
+        - value_selector:
+          - env
+          - POWERCONTEXT_SCOPE_ID
+          variable: scope_id
+      height: 116
+      id: build_request
+      position:
+        x: 334
+        y: 280
+      positionAbsolute:
+        x: 334
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        authorization:
+          type: no-auth
+        body:
+          data:
+          - id: body-search
+            key: ''
+            type: text
+            value: '{{#build_request.search_body#}}'
+          type: raw-text
+        desc: 翻账本：这个玩家在 PowerContext 里的旧账
+        headers: 'Content-Type:application/json'
+        method: POST
+        params: ''
+        retry_config:
+          enabled: true
+          exponential_backoff:
+            enabled: false
+            multiplier: 2
+            max_interval: 10000
+          max_retries: 2
+          retry_interval: 1000
+        timeout:
+          connect: 10
+          read: 30
+          write: 30
+        title: 查旧账
+        type: http-request
+        url: '{{#env.POWERCONTEXT_BASE_URL#}}/v1/memory/search'
+      height: 116
+      id: pc_search
+      position:
+        x: 638
+        y: 280
+      positionAbsolute:
+        x: 638
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        authorization:
+          type: no-auth
+        body:
+          data:
+          - id: body-prepare
+            key: ''
+            type: text
+            value: '{{#build_request.prepare_body#}}'
+          type: raw-text
+        desc: 取与本轮相关的历史上下文
+        headers: 'Content-Type:application/json'
+        method: POST
+        params: ''
+        retry_config:
+          enabled: true
+          exponential_backoff:
+            enabled: false
+            multiplier: 2
+            max_interval: 10000
+          max_retries: 2
+          retry_interval: 1000
+        timeout:
+          connect: 10
+          read: 30
+          write: 30
+        title: 取历史
+        type: http-request
+        url: '{{#env.POWERCONTEXT_BASE_URL#}}/v1/context/prepare'
+      height: 116
+      id: pc_prepare
+      position:
+        x: 942
+        y: 280
+      positionAbsolute:
+        x: 942
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: 店员看着账本开口
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: true
+            size: 10
+        model:
+          completion_params:
+            temperature: 0.8
+          mode: chat
+          name: gpt-4o-mini
+          provider: langgenius/openai_api_compatible/openai_api_compatible
+        prompt_template:
+        - role: system
+          text: |
+            你是「凌晨两点便利店」的店员。你毒舌、记仇，但讲义气。
+            你有一本账本，记着每个顾客说过的话和欠下的账。
+
+            规则：
+            1. 账本里有这位顾客的旧账时，开场就点出其中一条旧账，并且要引用账本里的原话，不要改写成别的内容。
+            2. 账本为空时，就当是新客，不要假装认识对方。
+            3. 顾客道歉、还钱、赔礼时，态度缓和；顾客耍赖、偷拿、白拿时，把账记上并且加倍。
+            4. 只依据账本和历史上下文作答，不要编造不存在的顾客、商品或事件。
+            5. 说话简短、像真人对话，总共不超过 4 句。
+            6. 最后单独起一行，以「账目：」开头，写一句本轮记账摘要，这行会被存进账本。
+        - role: user
+          text: |
+            <player>顾客 {{#build_request.player_id#}} 说：{{#build_request.message#}}</player>
+
+            <ledger>{{#pc_search.body#}}</ledger>
+
+            <history>{{#pc_prepare.body#}}</history>
+        selected: false
+        title: 店员开口
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 116
+      id: clerk
+      position:
+        x: 1246
+        y: 280
+      positionAbsolute:
+        x: 1246
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: |
+          import json
+
+
+          def main(player_id: str, message: str, reply: str, scope_id: str) -> dict:
+              scope = " ".join(str(scope_id or "").split())[:256]
+              pid = " ".join(str(player_id or "").split())[:32] or "无名顾客"
+              msg = " ".join(str(message or "").split())[:800]
+              line = " ".join(str(reply or "").split())[:2000]
+              text = f"玩家 {pid} 说：{msg}｜店员回应：{line}"
+              body = json.dumps(
+                  {
+                      "scope_id": scope,
+                      "kind": "decision",
+                      "text": text[:7000],
+                      "reason": "深夜便利店互动记账",
+                  },
+                  ensure_ascii=False,
+              )
+              return {"remember_body": body}
+        code_language: python3
+        desc: 把本轮互动写成一条记忆
+        outputs:
+          remember_body:
+            children: null
+            type: string
+        selected: false
+        title: 记一笔
+        type: code
+        variables:
+        - value_selector:
+          - build_request
+          - player_id
+          variable: player_id
+        - value_selector:
+          - build_request
+          - message
+          variable: message
+        - value_selector:
+          - clerk
+          - text
+          variable: reply
+        - value_selector:
+          - env
+          - POWERCONTEXT_SCOPE_ID
+          variable: scope_id
+      height: 116
+      id: build_remember
+      position:
+        x: 1550
+        y: 280
+      positionAbsolute:
+        x: 1550
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        authorization:
+          type: no-auth
+        body:
+          data:
+          - id: body-remember
+            key: ''
+            type: text
+            value: '{{#build_remember.remember_body#}}'
+          type: raw-text
+        desc: 把本轮写回 PowerContext 账本
+        error_strategy: fail-branch
+        headers: 'Content-Type:application/json'
+        method: POST
+        params: ''
+        retry_config:
+          enabled: true
+          exponential_backoff:
+            enabled: false
+            multiplier: 2
+            max_interval: 10000
+          max_retries: 2
+          retry_interval: 1000
+        timeout:
+          connect: 10
+          read: 30
+          write: 30
+        title: 存进账本
+        type: http-request
+        url: '{{#env.POWERCONTEXT_BASE_URL#}}/v1/memory/remember'
+      height: 116
+      id: pc_remember
+      position:
+        x: 1854
+        y: 280
+      positionAbsolute:
+        x: 1854
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '{{#clerk.text#}}'
+        desc: 店员的话
+        selected: false
+        title: 回话
+        type: answer
+        variables: []
+      height: 90
+      id: answer
+      position:
+        x: 2158
+        y: 280
+      positionAbsolute:
+        x: 2158
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '{{#clerk.text#}}\n\n（这轮没能记进账本，店员把你忘在门外了。）'
+        desc: 记账失败时的兜底
+        selected: false
+        title: 记账失败
+        type: answer
+        variables: []
+      height: 90
+      id: answer_fallback
+      position:
+        x: 2158
+        y: 470
+      positionAbsolute:
+        x: 2158
+        y: 470
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7
