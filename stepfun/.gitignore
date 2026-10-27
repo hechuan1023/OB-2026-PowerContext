@@ -1,0 +1,8 @@
+node_modules/
+dist/
+public/models/
+.env
+test-results/
+results/*.png
+tmp/
+__pycache__/

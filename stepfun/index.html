@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#183c32" />
+    <title>Local Atlas · 端侧知识库</title>
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <a class="brand" href="/" aria-label="Local Atlas 首页"><span class="brand-symbol">a</span><span>local atlas<span class="brand-sub">端侧知识工作台</span></span></a>
+        <div class="workspace-label">WORKSPACE <span>01</span></div>
+        <div class="sidebar-heading">我的知识库 <button id="new-kb" class="icon-button" title="新建知识库" aria-label="新建知识库">＋</button></div>
+        <nav id="collections" aria-label="知识库列表"></nav>
+        <div class="sidebar-note"><span class="tiny-dot"></span>计算发生在你的浏览器<p>文档与向量存储在本地 seekdb。模型下载完成后即可离线推理。</p></div>
+        <div class="sidebar-footer"><span>seekdb × 阶跃星辰</span><span>2026</span></div>
+      </aside>
+      <main>
+        <header class="topbar"><div>知识工作台 <span class="slash">/</span> <strong id="current-name">尚未选择知识库</strong></div><span id="db-status" class="badge">连接数据库…</span></header>
+        <div class="page">
+          <div class="eyebrow"><span class="tiny-dot"></span> YOUR KNOWLEDGE, ON YOUR DEVICE</div>
+          <div class="page-title"><div><h1>让知识，在本地连接。</h1><p>导入文字，用语义和关键词找到需要的那一段。</p></div><span class="index-mark">[ A—01 ]</span></div>
+          <div class="layout">
+            <section class="content">
+              <form id="search-form" class="search-card">
+                <div class="card-heading"><h2>探索知识</h2><span>SEARCH</span></div>
+                <div class="search-input"><span aria-hidden="true">⌕</span><input id="query" aria-label="搜索问题" maxlength="500" placeholder="用你的话，描述想找的内容…" autocomplete="off"><button id="search" type="submit" class="primary">检索 <span>↗</span></button></div>
+                <div class="search-options"><label><select id="search-mode" aria-label="检索模式"><option value="hybrid">混合检索 · RRF</option><option value="vector">语义检索</option></select></label><label>结果数 <select id="top-k" aria-label="结果数"><option>5</option><option>10</option><option>20</option></select></label><span>由 seekdb 完成检索与排序</span></div>
+              </form>
+              <div class="section-title"><h2 id="results-heading">知识库内容</h2><span id="result-count">等待导入</span></div>
+              <div id="results" aria-live="polite"><div class="empty-state"><div class="empty-symbol">⌘</div><h3>从一份文档开始</h3><p>将笔记、文档或资料放进来，<br>让分散的信息成为可检索的知识。</p><button id="empty-sample" class="text-button">试试示例语料 <span>→</span></button></div></div>
+              <section class="import-card" id="dropzone" tabindex="0" aria-label="拖放文本文件导入">
+                <div class="import-icon">↥</div><div><h3>添加到知识库</h3><p>拖入 .txt / .md 文件 · UTF-8 · 单文件 ≤ 1 MiB</p></div><button id="pick-files" class="secondary">选择文件</button>
+                <input id="files" type="file" accept=".txt,.md,text/plain,text/markdown" multiple hidden>
+                <div class="import-actions"><button id="paste" class="text-button">粘贴文字</button><span>·</span><button id="sample" class="text-button">导入示例</button><span>·</span><button id="refresh" class="text-button">刷新索引</button></div>
+              </section>
+              <div id="activity" role="status" class="activity">准备就绪。先加载模型，再创建或选择知识库。</div>
+              <progress id="progress" max="100" value="0" hidden></progress>
+            </section>
+            <aside class="details">
+              <section class="runtime-card"><div class="card-heading"><h2>端侧引擎</h2><span class="live-dot"></span></div><div class="runtime-value" id="backend">未加载<span>模型在浏览器 Worker 中运行</span></div><label class="field-label" for="profile">运行配置</label><select id="profile"><option value="auto">自动 · WebGPU 优先</option><option value="wasm">INT8 · WASM</option><option value="fp32">FP32 · WASM 基线</option><option value="gpu">FP16 · WebGPU 实验</option></select><button id="load-model" class="secondary full">加载模型</button><div id="fallback" class="fallback" hidden></div><div class="model-caption"><strong>BGE-small-zh-v1.5</strong><span>512 维 · CLS · L2 归一化</span><span>公开模型 · 固定版本 · 本地计算</span></div></section>
+              <section class="stats-card"><div class="card-heading"><h2>本次观测</h2><span>LIVE</span></div><dl id="stats"><div><dt>文档 / 片段</dt><dd id="doc-count">0 / 0</dd></div><div><dt>模型加载</dt><dd id="load-ms">—</dd></div><div><dt>文档向量化</dt><dd id="embed-ms">—</dd></div><div><dt>写入 / 刷新</dt><dd id="write-ms">—</dd></div><div><dt>查询向量化</dt><dd id="query-ms">—</dd></div><div><dt>seekdb 检索</dt><dd id="seek-ms">—</dd></div><div class="total"><dt>查询端到端</dt><dd id="total-ms">—</dd></div></dl><p>端到端包含向量化、网络往返和结果展示。</p></section>
+              <button id="benchmark" class="benchmark-button">性能与质量实验 <span>↗</span></button><button id="export" class="text-button export-button">导出本次测量 JSON ↓</button>
+            </aside>
+          </div>
+          <footer class="page-footer"><span>LOCAL FIRST. KNOWLEDGE ALWAYS.</span><span>模型计算留在设备 · 检索交给 seekdb</span></footer>
+        </div>
+      </main>
+    </div>
+    <dialog id="modal"><form method="dialog"><button class="dialog-close" aria-label="关闭">×</button></form><div id="modal-content"></div></dialog>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

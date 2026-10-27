@@ -1,0 +1,35 @@
+{
+  "cpu": "12th Gen Intel(R) Core(TM) i5-12450H",
+  "memoryBytes": 16896290816,
+  "os": {
+    "Caption": "Microsoft Windows 11 专业版",
+    "Version": "10.0.26200"
+  },
+  "gpus": [
+    {
+      "Name": "AskLink Display Adapter (HDR)",
+      "DriverVersion": "7.7.2.8"
+    },
+    {
+      "Name": "GameViewer Virtual Display Adapter",
+      "DriverVersion": "15.6.5.199"
+    },
+    {
+      "Name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "DriverVersion": "32.0.15.7283"
+    },
+    {
+      "Name": "Intel(R) UHD Graphics",
+      "DriverVersion": "32.0.101.7026"
+    }
+  ],
+  "node": "v26.2.0",
+  "docker": "28.4.0",
+  "seekdbImage": "oceanbase/seekdb@sha256:4db4961869d554313520d6081fca29265ba6da6db7313311bd8acbed771a956b",
+  "seekdbConfig": {
+    "DATAFILE_SIZE": "2G",
+    "LOG_DISK_SIZE": "2G",
+    "CPU_COUNT": 2,
+    "MEMORY_LIMIT": "2G"
+  }
+}

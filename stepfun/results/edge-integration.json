@@ -1,0 +1,241 @@
+{
+  "startedAt": "2026-10-27T13:10:44.186Z",
+  "tests": [
+    {
+      "kb": "it_mvqpefkv_a",
+      "fallback": false,
+      "runtime": {
+        "device": "webgpu",
+        "dtype": "fp16",
+        "fallback": "",
+        "loadMs": 1210.890000000596,
+        "warmupMs": 558.0699999928474,
+        "gpuAdapter": {
+          "vendor": "intel",
+          "architecture": "gen-12lp",
+          "device": "",
+          "description": ""
+        },
+        "signature": "Xenova/bge-small-zh-v1.5@75c43b069aac4d136ba6bc1122f995fedcfd2781:cls:l2:query-prefix-v1:chunk220-40",
+        "threads": 4,
+        "transfers": [
+          {
+            "url": "/models/Xenova/bge-small-zh-v1.5/tokenizer_config.json",
+            "bytes": 367,
+            "fetchMs": 13.57999999821186
+          },
+          {
+            "url": "/models/Xenova/bge-small-zh-v1.5/config.json",
+            "bytes": 716,
+            "fetchMs": 14.924999997019768
+          },
+          {
+            "url": "/models/Xenova/bge-small-zh-v1.5/tokenizer.json",
+            "bytes": 439125,
+            "fetchMs": 22.924999997019768
+          },
+          {
+            "url": "/models/Xenova/bge-small-zh-v1.5/onnx/model_fp16.onnx",
+            "bytes": 47497427,
+            "fetchMs": 279.15000000596046
+          }
+        ],
+        "reused": false
+      },
+      "imported": {
+        "sources": [
+          "4ad38819d1e6616fcc8219b9dce750d6b5c68d5e84789119f00d32d01c5f51c6",
+          "e4bb6c50fd7d6bc0b804e1c8b4aacfcb0153fda32e5464881b6cc1785434bae4",
+          "2e713226dd905278d4f30a38da1f6d830bd521aa01dad34a05ea975e34a24ba9",
+          "7e06b1cbbbc68f5fcd4f9cc49cdd47731bd1adac538aa5a891c59c48ec0fb9ad",
+          "011a72805e3fe8f1efc3a98082a8032abf5e870c515ce060a317f3d39d1c36f1",
+          "f89a8fce6b17cc628175d99b75265fb8533b883c9a4e45674d4ae833968318ef",
+          "99251f44e4f904146715f6a477eb10703bebf958f0f9f6bb986c5dd1ab52c3b2",
+          "f1a94977c141f51297b4dbd7d3f1ea78b2b80a419abe4ab61362579a7f5b7619",
+          "33e6ac162d49c976e62114c5f2aa95dff655e848b3ba38a9a2535babfbcb2295",
+          "b1aa225ce409439a9f5b78a95e6aeb2338feb924d61d5eef249a71bd4e3cab67"
+        ],
+        "chunks": 10,
+        "documents": 10,
+        "inferenceMs": 330.794999986887,
+        "batches": [
+          {
+            "count": 8,
+            "ms": 198.26999999582767
+          },
+          {
+            "count": 2,
+            "ms": 132.39500001072884
+          }
+        ],
+        "writeMs": 292.12609999999404,
+        "refreshMs": 672.3999999910593,
+        "totalMs": 1866.3200000077486,
+        "dtype": "fp16",
+        "device": "webgpu"
+      },
+      "count": 10,
+      "countAfterRetry": 10,
+      "found": [
+        "WebGPU 降级.txt",
+        "FP16 精度.txt",
+        "集合隔离.txt",
+        "增量导入.txt",
+        "批处理优化.txt"
+      ],
+      "empty": 0,
+      "incremental": "增量校验.txt",
+      "original": "月光档案的专属代号是青瓷信标，只有追加资料中包含这个关键术语。",
+      "concurrentCounts": [
+        5,
+        0
+      ],
+      "precisionRejected": true,
+      "pendingRefreshRejected": true,
+      "afterRefresh": "刷新屏障.txt",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0",
+      "crossOriginIsolated": true,
+      "gpuExposed": true,
+      "fulltextAfterRefresh": [
+        "刷新屏障.txt"
+      ],
+      "recovery": {
+        "searchRejected": true,
+        "refreshRejected": true,
+        "recovered": "ready"
+      },
+      "uiBackend": "WebGPU FP16\n本机推理 · GPU 加速",
+      "environmentRequests": [
+        {
+          "origin": "http://me.kis.v2.scr.kaspersky-labs.com",
+          "type": "script",
+          "action": "blocked system antivirus injection"
+        }
+      ],
+      "uiResults": [
+        "召回率.txt",
+        "索引刷新.txt",
+        "增量导入.txt",
+        "浏览器本地推理.txt",
+        "文本分块.txt"
+      ],
+      "uiSourceVisible": true
+    },
+    {
+      "kb": "it_mvqpetet_a",
+      "fallback": true,
+      "runtime": {
+        "device": "wasm",
+        "dtype": "q8",
+        "fallback": "WebGPU 或 shader-f16 不可用，已自动使用 WASM INT8",
+        "loadMs": 911.3699999898672,
+        "warmupMs": 84.00499999523163,
+        "gpuAdapter": null,
+        "signature": "Xenova/bge-small-zh-v1.5@75c43b069aac4d136ba6bc1122f995fedcfd2781:cls:l2:query-prefix-v1:chunk220-40",
+        "threads": 4,
+        "transfers": [
+          {
+            "url": "/models/Xenova/bge-small-zh-v1.5/config.json",
+            "bytes": 716,
+            "fetchMs": 17.265000000596046
+          },
+          {
+            "url": "/models/Xenova/bge-small-zh-v1.5/tokenizer_config.json",
+            "bytes": 367,
+            "fetchMs": 19.99500000476837
+          },
+          {
+            "url": "/models/Xenova/bge-small-zh-v1.5/tokenizer.json",
+            "bytes": 439125,
+            "fetchMs": 26.58499999344349
+          },
+          {
+            "url": "/models/Xenova/bge-small-zh-v1.5/onnx/model_quantized.onnx",
+            "bytes": 24010842,
+            "fetchMs": 199.1799999922514
+          }
+        ],
+        "reused": false
+      },
+      "imported": {
+        "sources": [
+          "4ad38819d1e6616fcc8219b9dce750d6b5c68d5e84789119f00d32d01c5f51c6",
+          "e4bb6c50fd7d6bc0b804e1c8b4aacfcb0153fda32e5464881b6cc1785434bae4",
+          "2e713226dd905278d4f30a38da1f6d830bd521aa01dad34a05ea975e34a24ba9",
+          "7e06b1cbbbc68f5fcd4f9cc49cdd47731bd1adac538aa5a891c59c48ec0fb9ad",
+          "011a72805e3fe8f1efc3a98082a8032abf5e870c515ce060a317f3d39d1c36f1",
+          "f89a8fce6b17cc628175d99b75265fb8533b883c9a4e45674d4ae833968318ef",
+          "99251f44e4f904146715f6a477eb10703bebf958f0f9f6bb986c5dd1ab52c3b2",
+          "f1a94977c141f51297b4dbd7d3f1ea78b2b80a419abe4ab61362579a7f5b7619",
+          "33e6ac162d49c976e62114c5f2aa95dff655e848b3ba38a9a2535babfbcb2295",
+          "b1aa225ce409439a9f5b78a95e6aeb2338feb924d61d5eef249a71bd4e3cab67"
+        ],
+        "chunks": 10,
+        "documents": 10,
+        "inferenceMs": 195.7900000065565,
+        "batches": [
+          {
+            "count": 8,
+            "ms": 156.6300000101328
+          },
+          {
+            "count": 2,
+            "ms": 39.064999997615814
+          }
+        ],
+        "writeMs": 273.7647000000579,
+        "refreshMs": 855.4050000011921,
+        "totalMs": 1806.7000000029802,
+        "dtype": "q8",
+        "device": "wasm"
+      },
+      "count": 10,
+      "countAfterRetry": 10,
+      "found": [
+        "WebGPU 降级.txt",
+        "FP16 精度.txt",
+        "集合隔离.txt",
+        "增量导入.txt",
+        "批处理优化.txt"
+      ],
+      "empty": 0,
+      "incremental": "增量校验.txt",
+      "original": "月光档案的专属代号是青瓷信标，只有追加资料中包含这个关键术语。",
+      "concurrentCounts": [
+        5,
+        0
+      ],
+      "precisionRejected": true,
+      "pendingRefreshRejected": true,
+      "afterRefresh": "刷新屏障.txt",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0",
+      "crossOriginIsolated": true,
+      "gpuExposed": true,
+      "fulltextAfterRefresh": [
+        "刷新屏障.txt"
+      ],
+      "recovery": {
+        "searchRejected": true,
+        "refreshRejected": true,
+        "recovered": "ready"
+      },
+      "uiBackend": "WASM INT8\n本机推理 · 4 线程",
+      "environmentRequests": [
+        {
+          "origin": "http://me.kis.v2.scr.kaspersky-labs.com",
+          "type": "script",
+          "action": "blocked system antivirus injection"
+        }
+      ],
+      "uiResults": [
+        "召回率.txt",
+        "索引刷新.txt",
+        "增量导入.txt",
+        "文本分块.txt",
+        "浏览器本地推理.txt"
+      ],
+      "uiSourceVisible": true
+    }
+  ],
+  "finishedAt": "2026-10-27T13:11:18.063Z"
+}
