@@ -23,7 +23,14 @@ from pathlib import Path
 
 import pytest
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import ArrayObject, DecodedStreamObject, DictionaryObject, EncodedStreamObject, NameObject
+from pypdf.generic import (
+    ArrayObject,
+    DecodedStreamObject,
+    DictionaryObject,
+    EncodedStreamObject,
+    NameObject,
+    NumberObject,
+)
 
 from powercontext.builtin.artifacts.memory import MemoryEntryInput
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
@@ -117,6 +124,71 @@ def test_password_required_document_is_rejected() -> None:
 
 def test_empty_password_document_with_compressed_text_is_readable() -> None:
     pages = parse_pdf_document(PDFDocumentInput(document_id="permissions", content=_document("")))
+    assert [page.text.strip() for page in pages] == [
+        "Revenue 1,234.50 and operating income 42.",
+        "",
+        "Cash flows 987 and depreciation 10.",
+    ]
+
+
+@pytest.mark.parametrize("damage", ["contents", "content-array", "missing-font", "invalid-font", "form-font"])
+def test_late_structural_damage_fails_the_whole_document(damage: str) -> None:
+    writer = PdfWriter(clone_from=io.BytesIO(_document()))
+    page = writer.pages[-1]
+    resources = page["/Resources"]
+    assert isinstance(resources, DictionaryObject)
+    fonts = resources["/Font"]
+    assert isinstance(fonts, DictionaryObject)
+    if damage == "contents":
+        page[NameObject("/Contents")] = NumberObject(42)
+    elif damage == "content-array":
+        page[NameObject("/Contents")] = ArrayObject([page.raw_get("/Contents"), NumberObject(42)])
+    elif damage == "missing-font":
+        del fonts["/F1"]
+    elif damage == "invalid-font":
+        fonts[NameObject("/F1")] = NumberObject(42)
+    else:
+        form = DecodedStreamObject()
+        form.set_data(b"BT /F99 12 Tf (Missing font must not become an empty page) Tj ET")
+        form[NameObject("/Subtype")] = NameObject("/Form")
+        form[NameObject("/Resources")] = resources
+        resources[NameObject("/XObject")] = DictionaryObject({NameObject("/Form1"): writer._add_object(form)})
+        contents = DecodedStreamObject()
+        contents.set_data(b"/Form1 Do")
+        page.replace_contents(contents.flate_encode())
+    output = io.BytesIO()
+    writer.write(output)
+    with pytest.raises(ValueError, match="unable to completely parse"):
+        parse_pdf_document(PDFDocumentInput(document_id="late-damage", content=output.getvalue()))
+
+
+def test_inherited_resources_and_form_content_keep_full_text() -> None:
+    writer = PdfWriter(clone_from=io.BytesIO(_document()))
+    first = writer.pages[0]
+    resources = first["/Resources"]
+    assert writer._pages is not None
+    parent = writer._pages.get_object()
+    assert isinstance(parent, DictionaryObject)
+    parent[NameObject("/Resources")] = resources
+    del first["/Resources"]
+    last = writer.pages[-1]
+    form = DecodedStreamObject()
+    original = last.get_contents()
+    assert original is not None
+    form.set_data(original.get_data())
+    form[NameObject("/Type")] = NameObject("/XObject")
+    form[NameObject("/Subtype")] = NameObject("/Form")
+    form[NameObject("/BBox")] = ArrayObject([NumberObject(n) for n in (0, 0, 400, 600)])
+    form[NameObject("/Resources")] = last["/Resources"]
+    last[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/XObject"): DictionaryObject({NameObject("/Form1"): writer._add_object(form)})
+    })
+    contents = DecodedStreamObject()
+    contents.set_data(b"/Form1 Do")
+    last.replace_contents(contents.flate_encode())
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="inherited", content=output.getvalue()))
     assert [page.text.strip() for page in pages] == [
         "Revenue 1,234.50 and operating income 42.",
         "",
@@ -411,5 +483,72 @@ def test_financial_ratios_recall_operands_without_metric_names_on_the_pages(tmp_
                     entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
                     returned.add(locations[entry.sources[0].source_id])
                 assert expected <= returned, metric
+
+    asyncio.run(run())
+
+
+def test_note_paraphrases_and_document_comparisons_after_restart(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'notes.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        pages = (
+            ("RIVERTON_2024_10K", "Sales breakdown by product: consumer products 80, business products 30."),
+            ("RIVERTON_2025_10K", "Sales breakdown by product: consumer products 90, business products 40."),
+            ("DOW_2025_10K", "Sales of industrial materials 40."),
+            ("RIVERTON_2025_10K", "Note 7. Unrecognized compensation cost for non-vested stock-based awards was 73."),
+            (
+                "RIVERTON_2025_10K",
+                "Note 8. Acquired intangibles are amortized over estimated useful lives of 4 to 9 years.",
+            ),
+            ("RIVERTON_2025_10K", "Our geographic reporting region is Aster North South Rim (ANSR)."),
+            ("RIVERTON_2025_10K", "Geographic revenue: ANSR 120; domestic 80."),
+            *(
+                (
+                    "RIVERTON_2025_10K",
+                    f"Consolidated Statement of Equity\nSubsidiary {n}. "
+                    "Employee equity compensation includes acquired intangible assets. Total equity 100. "
+                    "We sell products internationally.",
+                )
+                for n in range(25)
+            ),
+        )
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(ScopeDraft(title="Notes", summary="Evidence", idempotency_key="notes"))
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, (document, body) in enumerate(pages, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id=document, document_sha256="c" * 64, page_number=number, text=body)
+                )
+                locations[source.name] = number
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            for question, expected in (
+                ("What is the breakdown of sales by product?", {1, 2}),
+                ("Compare Riverton sales in 2024 and 2025", {1, 2}),
+                ("Compare Riverton and DOW sales in 2025", {2, 3}),
+                ("How much employee equity compensation has Riverton not yet expensed in 2025?", {4}),
+                ("What future expense remains to be booked for Riverton's employee share grants?", {4}),
+                ("How long does Riverton amortize its acquired intangible assets?", {5}),
+                ("How much did Riverton sell to Aster North South Rim?", {7}),
+            ):
+                citations = await search_pdf_pages(memory, question, 20)
+                returned = []
+                for citation in citations:
+                    entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                    number = locations[entry.sources[0].source_id]
+                    assert entry.text == f"{pages[number - 1][0]}\n{pages[number - 1][1]}"
+                    returned.append(number)
+                assert len(returned) == len(set(returned))
+                assert expected <= set(returned), question
 
     asyncio.run(run())

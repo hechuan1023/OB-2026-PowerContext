@@ -26,7 +26,16 @@ from typing import Any
 
 from pydantic import BaseModel, Field, StrictBytes, StrictInt, StrictStr, field_validator
 from pypdf import PdfReader, get_configuration
-from pypdf.generic import ArrayObject, DictionaryObject, EncodedStreamObject, IndirectObject, NameObject, StreamObject
+from pypdf.generic import (
+    ArrayObject,
+    ContentStream,
+    DictionaryObject,
+    EncodedStreamObject,
+    IndirectObject,
+    NameObject,
+    NullObject,
+    StreamObject,
+)
 
 from powercontext.builtin.artifacts.memory.models import MemoryCitation, MemoryHit
 from powercontext.builtin.runtime.models import GetMemoryEntryRequest, SearchMemoryRequest
@@ -222,6 +231,25 @@ _METRICS = (
 )
 _METRIC_PATTERNS = tuple((re.compile(pattern), phrases, kinds) for pattern, phrases, kinds in _METRICS)
 
+# Offline accounting terminology, applied to any document. Expansions help
+# natural-language questions reach notes whose wording differs from the query.
+_NOTE_CONCEPTS = (
+    (
+        r"\b(?:compensation|remuneration|awards?|(?:stock|share|equity)\s+grants?)\b",
+        ("compensation", "stock based awards", "share based payments"),
+    ),
+    (r"\b(?:not yet|unrecognized|unrecognised|remain(?:s|ing)?)\b", ("unrecognized", "remaining")),
+    (r"\b(?:useful li(?:fe|ves)|how long|write off|written off)\b", ("useful lives", "amortization", "depreciation")),
+    (r"\b(?:abroad|overseas|foreign|international)\b", ("foreign", "international")),
+    (r"\b(?:retained|undistributed|unremitted)\b", ("retained earnings", "undistributed earnings", "unremitted")),
+    (
+        r"\b(?:lawsuits?|litigation|legal (?:battles|proceedings))\b",
+        ("legal proceedings", "contingencies", "litigation"),
+    ),
+    (r"\b(?:geograph\w*|territories|regions)\b", ("geographic", "reportable segments", "countries", "operations")),
+)
+_NOTE_PATTERNS = tuple((re.compile(pattern), phrases) for pattern, phrases in _NOTE_CONCEPTS)
+
 
 def _normalize_question(question: str) -> str:
     normalized = re.sub(r"(?<=\w)['\u2019]s\b", "", question.casefold())
@@ -317,6 +345,77 @@ def _validate_pdf_streams(reader: PdfReader) -> None:
         pending.extend(value.values() if isinstance(value, DictionaryObject) else value)
 
 
+def _read_content_stream(content: Any, reader: PdfReader) -> ContentStream | None:
+    if isinstance(content, IndirectObject):
+        content = content.get_object()
+    if content is None or isinstance(content, NullObject):
+        return None
+    if isinstance(content, ArrayObject):
+        if any(not isinstance(item.get_object(), StreamObject) for item in content):
+            raise ValueError("invalid PDF content stream array")  # noqa: TRY003
+    elif not isinstance(content, StreamObject):
+        raise TypeError("invalid PDF content stream")  # noqa: TRY003
+    return ContentStream(content, reader)
+
+
+def _resource_object(
+    resources: DictionaryObject, category: str, name: Any, expected_type: type[DictionaryObject]
+) -> DictionaryObject:
+    collection = resources.get(category)
+    if isinstance(collection, IndirectObject):
+        collection = collection.get_object()
+    if (
+        not isinstance(name, NameObject)
+        or not isinstance(collection, DictionaryObject)
+        or name not in collection
+        or not isinstance(collection[name], expected_type)
+    ):
+        raise ValueError("invalid or missing PDF content resource")  # noqa: TRY003
+    return collection[name]
+
+
+def _validate_content_resources(stream: ContentStream, resources: DictionaryObject) -> list[tuple[Any, Any]]:
+    forms = []
+    for operands, operator in stream.operations:
+        if operator == b"Tf":
+            if len(operands) != 2:
+                raise ValueError("invalid PDF text font operation")  # noqa: TRY003
+            _resource_object(resources, "/Font", operands[0], DictionaryObject)
+        elif operator == b"Do":
+            if len(operands) != 1:
+                raise ValueError("invalid PDF XObject operation")  # noqa: TRY003
+            form = _resource_object(resources, "/XObject", operands[0], StreamObject)
+            if form.get("/Subtype") == "/Form":
+                forms.append((form, form.get("/Resources", resources)))
+    return forms
+
+
+def _validate_page_content(page: DictionaryObject, reader: PdfReader) -> None:
+    """Validate resources actually used by page and nested Form text operations.
+
+    Even strict pypdf extraction can silently discard invalid Contents or emit
+    replacement characters for an undeclared font. Blank pages remain valid;
+    their lack of text is not itself evidence of corruption.
+    """
+
+    pending = [(page.get("/Contents"), page.get("/Resources", DictionaryObject()))]
+    seen: set[tuple[int, int]] = set()
+    while pending:
+        content, resources = pending.pop()
+        stream = _read_content_stream(content, reader)
+        if stream is None:
+            continue
+        if isinstance(resources, IndirectObject):
+            resources = resources.get_object()
+        if not isinstance(resources, DictionaryObject):
+            raise TypeError("invalid PDF resource dictionary")  # noqa: TRY003
+        identity = (id(content), id(resources))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        pending.extend(_validate_content_resources(stream, resources))
+
+
 def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
     """Extract every page, returning nothing until the complete input succeeds."""
 
@@ -330,6 +429,7 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
         _validate_pdf_streams(reader)
         pages = []
         for number, page in enumerate(reader.pages, start=1):
+            _validate_page_content(page, reader)
             text = page.extract_text() or ""
             pages.append(
                 PDFPageInput(
@@ -408,6 +508,15 @@ PDF_PAGE_SOURCE_DEFINITION = AdapterSourceDefinition[PDFPageInput, PDFPageSource
 
 
 def _stem(word: str) -> str:
+    # Keep financial nouns and their common verb forms together, without an
+    # aggressive suffix stemmer conflating unrelated short company names.
+    if word in {"tax", "taxes", "taxed", "taxation", "taxing"}:
+        return "tax"
+    if word in {"expense", "expenses", "expensed", "expensing"}:
+        return "expense"
+    for root in ("amortiz", "depreciat", "recogniz", "unrecogniz", "compensat", "restructur"):
+        if word.startswith(root) and word[len(root) :] in {"e", "ed", "es", "ing", "ation", "ations"}:
+            return root
     if len(word) > 5 and word.endswith("ies"):
         return word[:-3] + "y"
     if len(word) > 4 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
@@ -485,6 +594,23 @@ def _statement_kinds(question: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(kinds))
 
 
+def _primary_statement_kinds(question: str) -> tuple[str, ...]:
+    """Reserve statement anchors only for statement or financial metric intent."""
+
+    normalized = _normalize_question(question)
+    kinds = [kind for kind, pattern in _STATEMENT_HEADINGS.items() if pattern.search(normalized)]
+    for pattern, _phrases, statements in _METRIC_PATTERNS:
+        if pattern.search(normalized):
+            kinds.extend(statements)
+    if re.search(r"\bebitda\b", normalized):
+        kinds.extend(("income", "cash"))
+    if re.search(r"\b(?:cash flow statements?|cash flows? from|cash.*operating activities)\b", normalized):
+        kinds.append("cash")
+    if re.search(r"\b(?:total revenue|net income|operating profit|pnl)\b", normalized):
+        kinds.append("income")
+    return tuple(dict.fromkeys(kinds))
+
+
 def _query_plan(question: str) -> tuple[tuple[str, ...], dict[str, float], tuple[str, ...]]:
     normalized = _normalize_question(question)
     words = tuple(dict.fromkeys(word for word in _WORDS.findall(normalized) if word not in _STOPWORDS))
@@ -497,6 +623,7 @@ def _query_plan(question: str) -> tuple[tuple[str, ...], dict[str, float], tuple
     expansions.extend(
         (vocabulary, 0.9) for pattern, vocabulary, _statements in _METRIC_PATTERNS if pattern.search(normalized)
     )
+    expansions.extend((vocabulary, 0.7) for pattern, vocabulary in _NOTE_PATTERNS if pattern.search(normalized))
     for vocabulary, weight in expansions:
         for phrase in vocabulary:
             phrases.append(phrase)
@@ -522,38 +649,33 @@ def _document_name(hit: MemoryHit) -> str:
 
 
 def _target_documents(documents: frozenset[str], question: str) -> frozenset[str]:
-    """Resolve explicit company/year mentions against document labels from Memory."""
+    """Restrict only explicit complete entities, retaining comparison subjects.
 
-    query_tokens = set(_WORDS.findall(question.casefold()))
-    alphanumeric_tokens = set(re.findall(r"[a-z0-9]+", question.casefold()))
-    compact_query = "".join(re.findall(r"[a-z0-9]+", question.casefold()))
-    years = set(re.findall(r"\b(?:19|20)\d{2}\b", re.sub(r"\bfy(?=\d)", "", question.casefold())))
-    newest_year = max(years, default="")
-    scored: list[tuple[tuple[int, int], str]] = []
+    A company may span adjacent words (or contain digits). A substring within
+    another word, such as DOW in breakdown, is never an entity match.
+    """
+
+    normalized = _normalize_question(question)
+    tokens = re.findall(r"[a-z0-9]+", normalized)
+    mentions = {"".join(tokens[start:end]) for start in range(len(tokens)) for end in range(start + 1, len(tokens) + 1)}
+    years = set(re.findall(r"\b(?:19|20)\d{2}\b", normalized))
+    matched: dict[str, list[str]] = {}
     for name in documents:
-        parts = set(_WORDS.findall(name.casefold()))
         company_parts = [
             part
-            for part in _WORDS.findall(name.casefold())
-            if part not in _DOCUMENT_GENERIC_WORDS and not re.fullmatch(r"(?:19|20)\d{2}", part)
+            for part in re.findall(r"[a-z0-9]+", name.casefold())
+            if part not in _DOCUMENT_GENERIC_WORDS
+            and not re.fullmatch(r"(?:19|20)\d{2}", part)
+            and part not in {"10k", "10q", "8k", "20f"}
         ]
         company = "".join(company_parts)
-        full_match = bool(company) and (
-            (len(company) >= 3 and company in compact_query) or company in alphanumeric_tokens
-        )
-        overlap = len(set(company_parts) & query_tokens)
-        partial = sum(
-            len(term) >= 4 and term not in _STOPWORDS and term not in _DOCUMENT_GENERIC_WORDS and term in company
-            for term in query_tokens
-        )
-        entity_score = 6 * full_match + 3 * overlap + partial
-        if entity_score:
-            year_score = 2 if newest_year and newest_year in parts else int(bool(years & parts))
-            scored.append(((entity_score, year_score), name))
-    if not scored:
-        return frozenset()
-    best = max(score for score, _ in scored)
-    return frozenset(name for score, name in scored if score == best)
+        if len(company) >= 2 and company in mentions:
+            matched.setdefault(company, []).append(name)
+    selected: set[str] = set()
+    for names in matched.values():
+        dated = [name for name in names if years.intersection(_WORDS.findall(name.casefold()))]
+        selected.update(dated or names)
+    return frozenset(selected)
 
 
 async def _recall_documents(memory: Any, documents: frozenset[str], candidate_limit: int) -> list[MemoryHit]:
@@ -586,6 +708,54 @@ async def _pdf_inventory(memory: Any) -> tuple[dict[tuple[str, str, str], str], 
     }, len(stored.entries)
 
 
+def _lexical_score(counts: Counter[str], weights: dict[str, float], idf: dict[str, float], average: float) -> float:
+    length = counts.total()
+    return sum(
+        weight * idf[term] * counts[term] * 2.2 / (counts[term] + 1.2 * (0.25 + 0.75 * length / average))
+        for term, weight in weights.items()
+        if counts[term]
+    )
+
+
+def _defined_abbreviations(body: str) -> list[tuple[str, frozenset[str]]]:
+    """Read long-form (ACRONYM) definitions from the retrieved document itself."""
+
+    definitions = []
+    for match in re.finditer(r"\(\s*[\"“‘']?([A-Z][A-Z0-9]{1,7})[\"”’']?\s*\)", body):  # noqa: RUF001
+        short = match[1].casefold()
+        preceding = re.findall(r"[a-z]+", body[max(0, match.start() - 160) : match.start()].casefold())
+        long = " ".join(preceding[-min(len(short) * 2, len(short) + 5) :])
+        position = len(long) - 1
+        # Align backwards, permitting internal letters (Asia-Pacific -> APAC),
+        # but requiring the first letter to start a word in the long form.
+        for index in range(len(short) - 1, -1, -1):
+            while position >= 0 and (
+                long[position] != short[index] or (index == 0 and position > 0 and long[position - 1].isalpha())
+            ):
+                position -= 1
+            if position < 0:
+                break
+            position -= 1
+        else:
+            terms = frozenset(_stem(word) for word in long[position + 1 :].split() if word not in _STOPWORDS)
+            if len(terms) > 1:
+                definitions.append((short, terms))
+    return definitions
+
+
+def _expand_document_terms(hits: list[MemoryHit], question: str, weights: dict[str, float]) -> dict[str, float]:
+    weights = dict(weights)
+    question_terms = {_stem(word) for word in _WORDS.findall(_normalize_question(question)) if word not in _STOPWORDS}
+    for hit in hits:
+        for abbreviation, expansion in _defined_abbreviations(hit.text.partition("\n")[2]):
+            if expansion <= question_terms:
+                weights[abbreviation] = max(weights.get(abbreviation, 0.0), 1.0)
+            elif abbreviation in question_terms:
+                for term in expansion:
+                    weights[term] = max(weights.get(term, 0.0), 0.7)
+    return weights
+
+
 def _rank_pages(
     hits: list[MemoryHit],
     question: str,
@@ -595,21 +765,28 @@ def _rank_pages(
 ) -> list[MemoryHit]:
     if not hits:
         return []
-    terms = [Counter(_stem(word) for word in _WORDS.findall(hit.text.partition("\n")[2].casefold())) for hit in hits]
+    weights = _expand_document_terms(hits, question, weights)
+    tokens = [[_stem(word) for word in _WORDS.findall(hit.text.partition("\n")[2].casefold())] for hit in hits]
+    terms = [Counter(words) for words in tokens]
     frequency = Counter(term for counts in terms for term in counts)
     average_length = max(1.0, sum(sum(counts.values()) for counts in terms) / len(terms))
+    idf = {term: math.log(1.0 + (len(hits) - frequency[term] + 0.5) / (frequency[term] + 0.5)) for term in weights}
     query_words = set(_WORDS.findall(question.casefold()))
-    statement_kinds = _statement_kinds(question)
+    statement_kinds = _primary_statement_kinds(question)
     scores = []
     titles: dict[tuple[str, str, str], dict[str, int]] = {}
-    for hit, counts in zip(hits, terms, strict=True):
-        length = sum(counts.values())
-        score = 0.0
-        for term, weight in weights.items():
-            count = counts[term]
-            if count:
-                idf = math.log(1.0 + (len(hits) - frequency[term] + 0.5) / (frequency[term] + 0.5))
-                score += weight * idf * count * 2.2 / (count + 1.2 * (0.25 + 0.75 * length / average_length))
+    for hit, counts, words in zip(hits, terms, tokens, strict=True):
+        page_score = _lexical_score(counts, weights, idf, average_length)
+        # Overlapping passages keep nearby sentences/table rows together while
+        # retaining the complete physical page as the only returned identity.
+        passage_score = max(
+            (
+                _lexical_score(Counter(words[start : start + 96]), weights, idf, 96.0)
+                for start in range(0, len(words), 48)
+            ),
+            default=0.0,
+        )
+        score = 0.5 * page_score + passage_score
         document, _, body = hit.text.partition("\n")
         document_terms = set(_WORDS.findall(document.casefold()))
         # A question's company and reporting year identify the document, while
