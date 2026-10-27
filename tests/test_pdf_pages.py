@@ -356,3 +356,60 @@ def test_compound_question_recalls_each_statement_among_many_subsidiary_tables(t
             assert {1, 2} <= set(returned)
 
     asyncio.run(run())
+
+
+def test_financial_ratios_recall_operands_without_metric_names_on_the_pages(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'ratios.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        bodies = (
+            "Consolidated Statements of Earnings\nNet sales 900. Cost of sales 500. "
+            "Operating income 200. Net earnings 150.",
+            "Consolidated Balance Sheets\nCurrent assets 300. Trade receivables 80. "
+            "Total assets 750. Current liabilities 150. Total liabilities 400. Stockholders equity 350.",
+            "Consolidated Statements of Cash Flows\nOperating activities 180. Investing activities: "
+            "Purchases of property and equipment 50. Financing activities: Cash dividends paid 20.",
+            *(
+                f"Operating review {number}\nWe monitor asset turnover, working capital, return on assets, "
+                "days of sales outstanding, debt to equity ratios, net debt and dividend payments. "
+                "These financial metrics guide management decisions and business planning."
+                for number in range(25)
+            ),
+        )
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Ratios", summary="Evidence", idempotency_key="ratios")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, text in enumerate(bodies, start=1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id="RIVERTON_2030", document_sha256="b" * 64, page_number=number, text=text)
+                )
+                locations[source.name] = number
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            for metric, expected in (
+                ("asset turnover", {1, 2}),
+                ("return on assets", {1, 2}),
+                ("days of sales outstanding", {1, 2}),
+                ("net working capital", {2}),
+                ("dividend payments", {3}),
+            ):
+                found = await search_pdf_pages(memory, f"What was Riverton's {metric} in 2030?", limit=20)
+                returned = set()
+                for citation in found:
+                    entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                    returned.add(locations[entry.sources[0].source_id])
+                assert expected <= returned, metric
+
+    asyncio.run(run())

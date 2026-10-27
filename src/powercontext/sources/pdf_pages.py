@@ -173,6 +173,63 @@ _CONCEPTS = (
     (frozenset({"dividend", "dividends"}), ("dividends", "shareholders", "distributions")),
 )
 
+# Metric names often do not occur on the pages containing their operands. These
+# are financial definitions, not document-specific questions or answer lookups.
+_METRICS = (
+    (r"\b(?:current ratio|working capital)\b", ("current assets", "current liabilities"), ("balance",)),
+    (r"\b(?:quick ratio|acid test)\b", ("cash", "receivables", "current liabilities"), ("balance",)),
+    (r"\b(?:return on assets|roa)\b", ("net income", "total assets"), ("income", "balance")),
+    (r"\b(?:return on equity|roe)\b", ("net income", "shareholders equity"), ("income", "balance")),
+    (
+        r"\b(?:return on invested capital|roic)\b",
+        ("operating income", "income taxes", "debt", "equity", "cash"),
+        ("income", "balance"),
+    ),
+    (r"\basset(?:s)? turnover\b", ("net sales", "revenue", "total assets"), ("income", "balance")),
+    (
+        r"\b(?:days (?:of )?sales outstanding|dso|receivables? turnover)\b",
+        ("revenue", "net sales", "accounts receivable", "trade receivables"),
+        ("income", "balance"),
+    ),
+    (
+        r"\b(?:days (?:of )?inventory(?: outstanding)?|dio|inventory turnover)\b",
+        ("cost of sales", "cost of goods sold", "inventories"),
+        ("income", "balance"),
+    ),
+    (
+        r"\b(?:days payables? outstanding|dpo|payables? turnover)\b",
+        ("cost of sales", "accounts payable"),
+        ("income", "balance"),
+    ),
+    (
+        r"\bcash conversion cycle\b",
+        ("revenue", "cost of sales", "receivables", "inventories", "accounts payable"),
+        ("income", "balance"),
+    ),
+    (r"\bnet debt\b", ("borrowings", "debt", "cash and cash equivalents"), ("balance",)),
+    (r"\bdebt (?:to )?equity\b", ("debt", "total liabilities", "shareholders equity"), ("balance",)),
+    (r"\b(?:gross margin|gross profit)\b", ("net sales", "revenue", "cost of sales"), ("income",)),
+    (r"\b(?:net margin|net profit margin)\b", ("net income", "net sales", "revenue"), ("income",)),
+    (r"\boperating margin\b", ("operating income", "operating profit", "revenue"), ("income",)),
+    (r"\binterest coverage\b", ("operating income", "interest expense"), ("income",)),
+    (
+        r"\b(?:capex|capital (?:expenditures?|spending|investment))\b",
+        ("purchases of property", "property plant equipment", "investing activities"),
+        ("cash",),
+    ),
+    (r"\bdividends?\b", ("dividends paid", "financing activities"), ("cash",)),
+    (r"\b(?:repurchases?|buybacks?)\b", ("repurchases", "common stock", "financing activities"), ("cash",)),
+)
+_METRIC_PATTERNS = tuple((re.compile(pattern), phrases, kinds) for pattern, phrases, kinds in _METRICS)
+
+
+def _normalize_question(question: str) -> str:
+    normalized = re.sub(r"(?<=\w)['\u2019]s\b", "", question.casefold())
+    normalized = re.sub(r"\bfy\s*(\d{4})\b", r"\1", normalized)
+    normalized = re.sub(r"\bp\s*&\s*l\b", "income", normalized)
+    normalized = re.sub(r"\bd\s*&\s*a\b", "depreciation and amortization", normalized)
+    return normalized.replace("amortisation", "amortization").replace("-", " ")
+
 
 def _document_id(value: str) -> str:
     if not value.strip():
@@ -370,6 +427,20 @@ _STATEMENT_HEADINGS = {
     "balance": re.compile(r"balance\s+sheets?|statements?\s+of\s+financial\s+position"),
     "equity": re.compile(r"statements?\s+of\s+(?:(?:shareholders?|stockholders?)\s+)?equity"),
 }
+_STATEMENT_ITEMS = {
+    "income": (
+        r"\b(?:net|total) (?:sales|revenue)",
+        r"\boperating (?:income|profit|loss)",
+        r"\bnet (?:income|earnings|loss)",
+    ),
+    "cash": (r"\boperating activities\b", r"\binvesting activities\b", r"\bfinancing activities\b"),
+    "balance": (
+        r"\btotal assets\b",
+        r"\btotal (?:current )?liabilities\b",
+        r"\b(?:stockholders|shareholders) equity\b",
+    ),
+    "equity": (r"\bretained earnings\b", r"\bbeginning balance\b", r"\bending balance\b"),
+}
 
 
 def _statement_title_quality(body: str, kind: str) -> int:
@@ -387,13 +458,20 @@ def _statement_title_quality(body: str, kind: str) -> int:
         r"(?:\s*\((?:continued|unaudited|audited|loss)\))*$",
         re.MULTILINE,
     )
-    return max((2 if "consolidated" in match[0].split() else 1 for match in title.finditer(normalized)), default=0)
+    quality = max((4 if "consolidated" in match[0].split() else 2 for match in title.finditer(normalized)), default=0)
+    if quality:
+        # A column label in a footnote can itself say "Consolidated Balance
+        # Sheet". The main statement also contains its defining line items.
+        terms = " ".join(_WORDS.findall(normalized))
+        quality += sum(bool(re.search(pattern, terms)) for pattern in _STATEMENT_ITEMS[kind])
+    return quality
 
 
 def _statement_kinds(question: str) -> tuple[str, ...]:
-    words = set(_WORDS.findall(question.casefold()))
+    normalized = _normalize_question(question)
+    words = set(_WORDS.findall(normalized))
     kinds: list[str] = []
-    if words & {"income", "earnings", "ebitda", "profit", "pnl"} or re.search(r"\bp\s*&\s*l\b", question.casefold()):
+    if words & {"income", "earnings", "ebitda", "profit", "pnl", "revenue", "revenues", "sales"}:
         kinds.append("income")
     if words & {"cash", "cashflow", "ebitda", "capex", "depreciation", "amortization"}:
         kinds.append("cash")
@@ -401,24 +479,32 @@ def _statement_kinds(question: str) -> tuple[str, ...]:
         kinds.append("balance")
     if words & {"equity", "stockholders", "shareholders"}:
         kinds.append("equity")
-    return tuple(kinds)
+    for pattern, _phrases, statements in _METRIC_PATTERNS:
+        if pattern.search(normalized):
+            kinds.extend(statements)
+    return tuple(dict.fromkeys(kinds))
 
 
 def _query_plan(question: str) -> tuple[tuple[str, ...], dict[str, float], tuple[str, ...]]:
-    normalized = re.sub(r"\bfy\s*(\d{4})\b", r"\1", question.casefold())
-    normalized = re.sub(r"\bp\s*&\s*l\b", "income", normalized)
+    normalized = _normalize_question(question)
     words = tuple(dict.fromkeys(word for word in _WORDS.findall(normalized) if word not in _STOPWORDS))
     weights = {_stem(word): 1.0 for word in words if not word.isdigit()}
     phrases: list[str] = []
     expanded: list[str] = []
-    for triggers, vocabulary in _CONCEPTS:
-        if triggers.intersection(words):
-            for phrase in vocabulary:
-                phrases.append(phrase)
-                expanded.append(phrase)
-                for term in phrase.split():
+    expansions: list[tuple[tuple[str, ...], float]] = [
+        (vocabulary, 0.7) for triggers, vocabulary in _CONCEPTS if triggers.intersection(words)
+    ]
+    expansions.extend(
+        (vocabulary, 0.9) for pattern, vocabulary, _statements in _METRIC_PATTERNS if pattern.search(normalized)
+    )
+    for vocabulary, weight in expansions:
+        for phrase in vocabulary:
+            phrases.append(phrase)
+            expanded.append(phrase)
+            for term in phrase.split():
+                if term not in _STOPWORDS:
                     stem = _stem(term)
-                    weights[stem] = max(weights.get(stem, 0.0), 0.7)
+                    weights[stem] = max(weights.get(stem, 0.0), weight)
     for kind in _statement_kinds(question):
         expanded.extend(_STATEMENT_QUERIES[kind])
     # Short searches avoid the generic Memory admission threshold rejecting a
@@ -470,36 +556,34 @@ def _target_documents(documents: frozenset[str], question: str) -> frozenset[str
     return frozenset(name for score, name in scored if score == best)
 
 
-async def _recall_documents(memory: Any, documents: frozenset[str], limit: int) -> list[MemoryHit]:
+async def _recall_documents(memory: Any, documents: frozenset[str], candidate_limit: int) -> list[MemoryHit]:
     """Recall complete document pools through Memory's indexed public search API.
 
     A global top-k for common financial terms can omit an entire target page.
     Every projection includes its document label, so an exact label query can
     retrieve that document independently of how frequently a question term occurs.
-    Grow the limit until Memory has returned the complete matching set.
+    The active entry count from Memory.list bounds the complete candidate pool;
+    retrieve it once instead of repeatedly doubling a truncated top-k.
     """
 
     hits: list[MemoryHit] = []
     for document in sorted(documents):
-        size = max(128, limit * 4)
-        while True:
-            page = await memory.search(SearchMemoryRequest(query=document, mode="fts", limit=size))
-            if len(page.hits) < size:
-                hits.extend(hit for hit in page.hits if _document_name(hit) == document)
-                break
-            size *= 2
+        page = await memory.search(SearchMemoryRequest(query=document, mode="fts", limit=candidate_limit))
+        hits.extend(hit for hit in page.hits if _document_name(hit) == document)
     return hits
 
 
-async def _available_documents(memory: Any) -> frozenset[str]:
-    # Listing discovers current document labels; it does not manufacture hits.
-    # All candidate citations below still come from Memory.search.
+async def _pdf_inventory(memory: Any) -> tuple[dict[tuple[str, str, str], str], int]:
+    # Listing bounds the pool and identifies PDF entries. Candidate citations
+    # still come exclusively from public Memory.search results.
     stored = await memory.list()
-    return frozenset(
-        row.entry.text.partition("\n")[0].strip()
+    return {
+        (row.memory_ref.artifact_id, row.entry.entry_id, row.entry.entry_version_id): row.entry.text.partition("\n")[
+            0
+        ].strip()
         for row in stored.entries
         if any(ref.source_type == "pdf-page" for ref in row.entry.sources)
-    )
+    }, len(stored.entries)
 
 
 def _rank_pages(
@@ -556,6 +640,38 @@ def _rank_pages(
     return anchors + [hit for hit in ranked if hit not in anchors]
 
 
+async def _page_candidates(
+    memory: Any, question: str, searches: tuple[str, ...], limit: int
+) -> tuple[list[MemoryHit], dict[tuple[str, str, str], float]]:
+    """Recall an eligible PDF pool using indexed, current-scope Memory searches."""
+
+    inventory, total_entries = await _pdf_inventory(memory)
+    if not inventory:
+        return [], {}
+    documents = frozenset(inventory.values())
+    targets = _target_documents(documents, question)
+    selected_documents = targets or documents
+    eligible = {identity for identity, document in inventory.items() if document in selected_documents}
+    candidates: dict[tuple[str, str, str], MemoryHit] = {}
+    votes: dict[tuple[str, str, str], float] = {}
+    for hit in await _recall_documents(memory, selected_documents, total_entries):
+        identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
+        if identity in eligible:
+            candidates[identity] = hit
+    # Once all eligible pages are available, individual term searches cannot
+    # improve recall. Keep one native question ranking; expand only if needed
+    # (for example when a document label contains no indexable characters).
+    queries = (question,) if eligible <= candidates.keys() else searches
+    for query in queries:
+        page = await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=max(64, limit * 5)))
+        for rank, hit in enumerate(page.hits, start=1):
+            identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
+            if identity in eligible:
+                candidates[identity] = hit
+                votes[identity] = votes.get(identity, 0.0) + 1.0 / (60 + rank)
+    return list(candidates.values()), votes
+
+
 async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple[MemoryCitation, ...]:
     """Search a caller's scoped Memory and return distinct, readable PDF page citations."""
 
@@ -564,26 +680,10 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
     if type(limit) is not int or limit < 1:
         raise ValueError("limit must be a positive integer")  # noqa: TRY003
     searches, weights, phrases = _query_plan(question)
-    documents = await _available_documents(memory)
-    if not documents:
-        return ()
-    targets = _target_documents(documents, question)
-    candidates: dict[tuple[str, str, str], MemoryHit] = {}
-    votes: dict[tuple[str, str, str], float] = {}
-    for query in searches:
-        page = await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=max(64, limit * 5)))
-        for rank, hit in enumerate(page.hits, start=1):
-            identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
-            candidates[identity] = hit
-            votes[identity] = votes.get(identity, 0.0) + 1.0 / (60 + rank)
-    selected_documents = targets or documents
-    for hit in await _recall_documents(memory, selected_documents, limit):
-        identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
-        candidates[identity] = hit
-    candidates = {identity: hit for identity, hit in candidates.items() if _document_name(hit) in selected_documents}
+    candidates, votes = await _page_candidates(memory, question, searches, limit)
     citations: list[MemoryCitation] = []
     seen: set[tuple[str, str]] = set()
-    for hit in _rank_pages(list(candidates.values()), question, weights, phrases, votes):
+    for hit in _rank_pages(candidates, question, weights, phrases, votes):
         citation = MemoryCitation(
             memory_ref=hit.memory_ref, entry_id=hit.entry_id, entry_version_id=hit.entry_version_id
         )
