@@ -39,6 +39,36 @@ integrations/gaode/
         └── SKILL.md
 ```
 
+`gaode/` at the repository root holds the same four files, so a judge can find the Skill without
+following the `integrations/` path.
+
+## Skill file format
+
+`SKILL.md` starts with a YAML frontmatter block that a standard Skill loader parses before the
+Markdown body:
+
+```yaml
+---
+name: amap-nearby-places
+description: Recommend nearby places around a user location ...
+---
+```
+
+Only `name` and `description` are required. `name` is a lowercase kebab-case slug and
+`description` states the purpose plus the situations and trigger words that should activate the
+Skill. Keep the `description` on a single line and do not put a `: ` sequence inside it: an
+unquoted YAML scalar stops at the first `: `, and the frontmatter then fails to parse. Validate
+the block after any edit:
+
+```bash
+python3 -c "import io,sys,yaml; \
+  t=io.open(sys.argv[1],encoding='utf-8').read().split('---',2)[1]; \
+  print(sorted(yaml.safe_load(t)))" gaode/SKILL.md
+```
+
+The Skill contains no API key and no credential. The evaluation platform supplies the Agent
+runtime, the model and the AMap tool configuration.
+
 ## MCP server configuration
 
 `mcp.json` registers the official AMap MCP server over stdio:
