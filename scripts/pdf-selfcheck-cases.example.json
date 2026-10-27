@@ -1,0 +1,20 @@
+{
+  "documents": [
+    {
+      "document_id": "MY_REPORT",
+      "file": "report.pdf"
+    }
+  ],
+  "queries": [
+    {
+      "id": "q1",
+      "question": "What were the company's total revenue and net income?",
+      "expected": []
+    },
+    {
+      "id": "q2",
+      "question": "What accounting policy does the company use for revenue recognition?",
+      "expected": []
+    }
+  ]
+}
