@@ -1,0 +1,745 @@
+{
+  "baseline_commit": "0e8587451be21ac032c5764e50b4c4eb39625523",
+  "provenance": "Developer questions and physical-page targets inspected from original PDFs. No official relevance labels or hidden questions were used.",
+  "candidate_pool_check": [
+    {
+      "document": "APPLE_2022_10K",
+      "eligible": 80,
+      "returned": 80,
+      "missing": 0
+    },
+    {
+      "document": "BOEING_2022_10K",
+      "eligible": 190,
+      "returned": 190,
+      "missing": 0
+    },
+    {
+      "document": "COCACOLA_2022_10K",
+      "eligible": 183,
+      "returned": 183,
+      "missing": 0
+    },
+    {
+      "document": "CVSHEALTH_2022_10K",
+      "eligible": 213,
+      "returned": 213,
+      "missing": 0
+    },
+    {
+      "document": "ORACLE_2022_10K",
+      "eligible": 132,
+      "returned": 132,
+      "missing": 0
+    },
+    {
+      "document": "PG_E_2022_10K",
+      "eligible": 352,
+      "returned": 352,
+      "missing": 0
+    }
+  ],
+  "runtime_recall_check": {
+    "queries": 12,
+    "targets": 16,
+    "before": 13,
+    "after": 16,
+    "rows": [
+      {
+        "question": "What was PepsiCo cash dividend coverage ratio in 2022?",
+        "expected": [
+          64,
+          65
+        ],
+        "before": {
+          "pages": [
+            64,
+            53,
+            54,
+            47,
+            65,
+            51,
+            30,
+            52,
+            106,
+            100,
+            67,
+            116,
+            77,
+            89,
+            111,
+            99,
+            132,
+            88,
+            58,
+            114
+          ],
+          "hits": 2
+        },
+        "after": {
+          "pages": [
+            64,
+            65,
+            62,
+            66,
+            53,
+            54,
+            47,
+            51,
+            30,
+            52,
+            106,
+            100,
+            67,
+            116,
+            77,
+            89,
+            111,
+            99,
+            132,
+            88
+          ],
+          "hits": 2
+        }
+      },
+      {
+        "question": "What percentage of PepsiCo net sales was consumed by SG&A in FY2022?",
+        "expected": [
+          62
+        ],
+        "before": {
+          "pages": [
+            44,
+            40,
+            71,
+            45,
+            43,
+            41,
+            46,
+            38,
+            105,
+            74,
+            103,
+            47,
+            70,
+            75,
+            39,
+            62,
+            9,
+            34,
+            77,
+            64
+          ],
+          "hits": 1
+        },
+        "after": {
+          "pages": [
+            62,
+            64,
+            65,
+            66,
+            44,
+            40,
+            71,
+            45,
+            43,
+            41,
+            46,
+            38,
+            105,
+            74,
+            103,
+            47,
+            70,
+            75,
+            39,
+            9
+          ],
+          "hits": 1
+        }
+      },
+      {
+        "question": "What was PepsiCo profit after tax as a percentage of turnover in FY2022?",
+        "expected": [
+          62
+        ],
+        "before": {
+          "pages": [
+            40,
+            44,
+            45,
+            43,
+            46,
+            41,
+            16,
+            81,
+            48,
+            62,
+            49,
+            24,
+            451,
+            42,
+            70,
+            449,
+            47,
+            452,
+            73,
+            60
+          ],
+          "hits": 1
+        },
+        "after": {
+          "pages": [
+            62,
+            64,
+            65,
+            66,
+            40,
+            44,
+            45,
+            43,
+            46,
+            41,
+            16,
+            81,
+            48,
+            49,
+            24,
+            451,
+            42,
+            70,
+            449,
+            47
+          ],
+          "hits": 1
+        }
+      },
+      {
+        "question": "What were PepsiCo cash inflows and outflows from financing in 2022?",
+        "expected": [
+          65
+        ],
+        "before": {
+          "pages": [
+            53,
+            51,
+            54,
+            47,
+            64,
+            65,
+            106,
+            52,
+            100,
+            116,
+            77,
+            114,
+            81,
+            58,
+            59,
+            80,
+            107,
+            111,
+            488,
+            68
+          ],
+          "hits": 1
+        },
+        "after": {
+          "pages": [
+            53,
+            51,
+            54,
+            47,
+            64,
+            65,
+            106,
+            52,
+            100,
+            116,
+            77,
+            114,
+            81,
+            58,
+            59,
+            80,
+            107,
+            111,
+            488,
+            68
+          ],
+          "hits": 1
+        }
+      },
+      {
+        "question": "How did PepsiCo fund its operations and investments in 2022? Use the cash flow statement.",
+        "expected": [
+          64,
+          65
+        ],
+        "before": {
+          "pages": [
+            64,
+            53,
+            54,
+            51,
+            100,
+            47,
+            106,
+            121,
+            107,
+            111,
+            102,
+            59,
+            65,
+            77,
+            502,
+            103,
+            112,
+            68,
+            116,
+            34
+          ],
+          "hits": 2
+        },
+        "after": {
+          "pages": [
+            64,
+            65,
+            53,
+            54,
+            51,
+            100,
+            47,
+            106,
+            121,
+            107,
+            111,
+            102,
+            59,
+            77,
+            502,
+            103,
+            112,
+            68,
+            116,
+            34
+          ],
+          "hits": 2
+        }
+      },
+      {
+        "question": "What was PepsiCo debt to assets ratio in 2022?",
+        "expected": [
+          66
+        ],
+        "before": {
+          "pages": [
+            97,
+            53,
+            65,
+            60,
+            66,
+            101,
+            102,
+            95,
+            98,
+            51,
+            55,
+            160,
+            106,
+            31,
+            85,
+            56,
+            47,
+            159,
+            64,
+            94
+          ],
+          "hits": 1
+        },
+        "after": {
+          "pages": [
+            62,
+            64,
+            65,
+            66,
+            97,
+            53,
+            60,
+            101,
+            102,
+            95,
+            98,
+            51,
+            55,
+            160,
+            106,
+            31,
+            85,
+            56,
+            47,
+            159
+          ],
+          "hits": 1
+        }
+      },
+      {
+        "question": "How much did cash and equivalents change between the beginning and end of PepsiCo fiscal 2022?",
+        "expected": [
+          65
+        ],
+        "before": {
+          "pages": [
+            65,
+            53,
+            54,
+            64,
+            47,
+            67,
+            77,
+            106,
+            116,
+            111,
+            51,
+            100,
+            39,
+            73,
+            114,
+            85,
+            59,
+            80,
+            96,
+            55
+          ],
+          "hits": 1
+        },
+        "after": {
+          "pages": [
+            62,
+            64,
+            65,
+            66,
+            53,
+            54,
+            47,
+            67,
+            77,
+            106,
+            116,
+            111,
+            51,
+            100,
+            39,
+            73,
+            114,
+            85,
+            59,
+            80
+          ],
+          "hits": 1
+        }
+      },
+      {
+        "question": "What was PepsiCo dividend payout ratio in 2022 based on its income and cash flow statements?",
+        "expected": [
+          62,
+          65
+        ],
+        "before": {
+          "pages": [
+            64,
+            53,
+            54,
+            47,
+            65,
+            51,
+            100,
+            99,
+            67,
+            52,
+            112,
+            107,
+            77,
+            59,
+            31,
+            106,
+            103,
+            121,
+            30,
+            111
+          ],
+          "hits": 1
+        },
+        "after": {
+          "pages": [
+            64,
+            65,
+            62,
+            66,
+            53,
+            54,
+            47,
+            51,
+            100,
+            99,
+            67,
+            52,
+            112,
+            107,
+            77,
+            59,
+            31,
+            106,
+            103,
+            121
+          ],
+          "hits": 2
+        }
+      },
+      {
+        "question": "Did PepsiCo fund its 2022 capital investment and shareholder distributions from internally generated funds?",
+        "expected": [
+          64,
+          65
+        ],
+        "before": {
+          "pages": [
+            64,
+            53,
+            54,
+            116,
+            47,
+            74,
+            72,
+            77,
+            40,
+            50,
+            73,
+            457,
+            26,
+            66,
+            108,
+            107,
+            51,
+            22,
+            85,
+            132
+          ],
+          "hits": 1
+        },
+        "after": {
+          "pages": [
+            64,
+            65,
+            53,
+            54,
+            116,
+            47,
+            74,
+            72,
+            77,
+            40,
+            50,
+            73,
+            457,
+            26,
+            66,
+            108,
+            107,
+            51,
+            22,
+            85
+          ],
+          "hits": 2
+        }
+      },
+      {
+        "question": "What was PepsiCo interest coverage ratio in FY2022?",
+        "expected": [
+          62
+        ],
+        "before": {
+          "pages": [
+            62,
+            46,
+            49,
+            40,
+            48,
+            278,
+            86,
+            105,
+            56,
+            413,
+            93,
+            59,
+            20,
+            64,
+            103,
+            39,
+            47,
+            292,
+            107,
+            106
+          ],
+          "hits": 1
+        },
+        "after": {
+          "pages": [
+            62,
+            64,
+            65,
+            66,
+            46,
+            49,
+            40,
+            48,
+            278,
+            86,
+            105,
+            56,
+            413,
+            93,
+            59,
+            20,
+            103,
+            39,
+            47,
+            292
+          ],
+          "hits": 1
+        }
+      },
+      {
+        "question": "What was the change in PepsiCo net earnings from 2021 to 2022?",
+        "expected": [
+          62
+        ],
+        "before": {
+          "pages": [
+            67,
+            99,
+            56,
+            40,
+            103,
+            107,
+            63,
+            54,
+            46,
+            47,
+            49,
+            71,
+            93,
+            101,
+            31,
+            62,
+            64,
+            104,
+            66,
+            24
+          ],
+          "hits": 1
+        },
+        "after": {
+          "pages": [
+            67,
+            99,
+            56,
+            40,
+            103,
+            107,
+            63,
+            54,
+            46,
+            47,
+            49,
+            71,
+            93,
+            101,
+            31,
+            62,
+            64,
+            104,
+            66,
+            24
+          ],
+          "hits": 1
+        }
+      },
+      {
+        "question": "What was the percentage change in PepsiCo net turnover in 2022?",
+        "expected": [
+          62
+        ],
+        "before": {
+          "pages": [
+            45,
+            40,
+            43,
+            44,
+            16,
+            46,
+            41,
+            38,
+            71,
+            452,
+            39,
+            33,
+            63,
+            449,
+            92,
+            60,
+            55,
+            65,
+            165,
+            91
+          ],
+          "hits": 0
+        },
+        "after": {
+          "pages": [
+            62,
+            64,
+            65,
+            66,
+            45,
+            40,
+            43,
+            44,
+            16,
+            46,
+            41,
+            38,
+            71,
+            452,
+            39,
+            33,
+            63,
+            449,
+            92,
+            60
+          ],
+          "hits": 1
+        }
+      }
+    ]
+  },
+  "checks": {
+    "public_acceptance_and_pdf_regressions": "64 passed in the locked Linux competition image with network disabled and read-only src.",
+    "old_source_reproduction": "The new top-20 Runtime regression fails with the previous committed source and passes with the candidate.",
+    "changed_python_files": "ruff and ty passed.",
+    "whole_repository_prek": "192 existing diagnostics; official autoformat changes restored."
+  },
+  "limitations": [
+    "Development recall is not official hidden-set Recall@20.",
+    "The candidate pool check covers six previously persisted development reports, not the official hidden documents.",
+    "Official evidence-text recall and full-page F1 remain unverified; this change does not modify parsing.",
+    "Reserving main statements for calculation questions trades some lexical ranking slots for complementary evidence; note-retrieval regression coverage is finite."
+  ],
+  "ranking_layer_regression": {
+    "queries": 167,
+    "targets": 204,
+    "before": 204,
+    "after": 204,
+    "regressions": []
+  }
+}

@@ -1056,3 +1056,63 @@ def test_financing_and_pension_paraphrases_recall_exact_pages_after_restart(tmp_
                 assert expected in returned
 
     asyncio.run(run())
+
+
+def test_calculation_and_split_cash_flow_evidence_survive_top_twenty(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'coverage.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        bodies = [
+            "Consolidated Statement of Income\n2031 2030\nNet sales 600 500\nOperating profit 90 80\nNet income 50 40",
+            "Consolidated Statement of Cash Flows\nOperating activities\nNet income 50\n"
+            "Investing activities\nPurchases of property and equipment 20",
+            "Consolidated Statement of Cash Flows (continued)\nFinancing activities\n"
+            "Cash dividends paid 15\nDebt repayments 10\nProceeds from borrowings 8",
+            "Consolidated Balance Sheets\nTotal assets 900\nTotal liabilities 400\nStockholders equity 500",
+        ]
+        bodies.extend(
+            f"Discussion {number}\n"
+            + "Capital investment and operations are funded internally. Net turnover percentage changes are monitored. "
+            * 10
+            for number in range(30)
+        )
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Table coverage", summary="Complete statements", idempotency_key="coverage")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, body in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(
+                        document_id="RIVERTON_2031_10K", document_sha256="b" * 64, page_number=number, text=body
+                    )
+                )
+                locations[source.name] = number
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            for expected, question in (
+                ({2, 3}, "Did Riverton fund capital investment and shareholder distributions internally in 2031?"),
+                ({1}, "What was the percentage change in Riverton net turnover in 2031?"),
+            ):
+                citations = await search_pdf_pages(memory, question, 20)
+                returned = []
+                for citation in citations:
+                    entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                    number = locations[entry.sources[0].source_id]
+                    assert entry.text == f"RIVERTON_2031_10K\n{bodies[number - 1]}".strip()
+                    returned.append(number)
+                assert len(returned) == len(set(returned)) == 20
+                assert expected <= set(returned)
+                assert citations == await search_pdf_pages(memory, question, 20)
+
+    asyncio.run(run())

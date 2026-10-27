@@ -673,6 +673,12 @@ def _primary_statement_kinds(question: str) -> tuple[str, ...]:
         kinds.append("cash")
     if re.search(r"\b(?:total revenue|net income|operating profit|pnl)\b", normalized):
         kinds.append("income")
+    # A calculation can describe an operand without using its accounting label.
+    # Keep the main statements as a small complementary evidence pool instead
+    # of requiring a dictionary entry for every ratio or financial paraphrase.
+    # Explicitly requested statement kinds retain priority, including at low limits.
+    if re.search(r"\b(?:calculate|compute|ratio|margin|percentage|percent)\b|\bhow much\b|%", normalized):
+        kinds.extend(("income", "cash", "balance"))
     return tuple(dict.fromkeys(kinds))
 
 
@@ -974,6 +980,35 @@ def _balance_supporting_pages(
     return supporting
 
 
+def _cash_statement_complements(
+    group: list[MemoryHit], best: MemoryHit, titles: dict[tuple[str, str, str], dict[str, int]], quality: int
+) -> list[MemoryHit]:
+    """Retain operating, investing and financing sections of a split statement."""
+
+    def identity(hit: MemoryHit) -> tuple[str, str, str]:
+        return hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id
+
+    supporting = [hit for hit in group if titles[identity(hit)]["cash"] >= (8 if quality >= 8 else 2)]
+    sections = {}
+    for hit in supporting:
+        body = " ".join(_WORDS.findall(hit.text.partition("\n")[2].casefold()))
+        sections[identity(hit)] = {pattern for pattern in _STATEMENT_ITEMS["cash"] if re.search(pattern, body)}
+    covered = set(sections[identity(best)])
+    result = []
+    while supporting and len(covered) < len(_STATEMENT_ITEMS["cash"]):
+        complement = max(
+            supporting,
+            key=lambda hit: (len(sections[identity(hit)] - covered), titles[identity(hit)]["cash"]),
+        )
+        missing = sections[identity(complement)] - covered
+        if not missing:
+            break
+        result.append(complement)
+        covered.update(missing)
+        supporting.remove(complement)
+    return result
+
+
 def _statement_anchors(
     ranked: list[MemoryHit],
     titles: dict[tuple[str, str, str], dict[str, int]],
@@ -1002,6 +1037,13 @@ def _statement_anchors(
                 )
                 if best not in anchors:
                     anchors.append(best)
+                if kind == "cash":
+                    # A cash-flow statement may split operating/investing and
+                    # financing activities across physical pages. The fuller
+                    # first page must not crowd out its complementary table.
+                    anchors.extend(
+                        hit for hit in _cash_statement_complements(group, best, titles, quality) if hit not in anchors
+                    )
                 if kind == "balance":
                     operands = {
                         phrase
