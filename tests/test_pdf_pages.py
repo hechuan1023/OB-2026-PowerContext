@@ -950,6 +950,7 @@ def test_financial_ratios_recall_operands_without_metric_names_on_the_pages(tmp_
                 ("asset turnover", {1, 2}),
                 ("return on assets", {1, 2}),
                 ("return on average assets", {1, 2}),
+                ("return on average total assets", {1, 2}),
                 ("return on average equity", {1, 2}),
                 ("days of sales outstanding", {1, 2}),
                 ("net working capital", {2}),
@@ -1419,6 +1420,103 @@ def test_report_defined_company_names_preserve_both_comparison_subjects(tmp_path
                 for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
             }
             assert expected <= found
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("wrapped_rows", [False, True])
+@pytest.mark.parametrize("subsidiary", ["Larch Electric Company", "Aster Electric Company"])
+def test_joint_filing_registrants_remain_comparison_candidates(
+    tmp_path: Path, wrapped_rows: bool, subsidiary: str
+) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'joint.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        separator = "\n" if wrapped_rows else " "
+        table = "\n".join(
+            separator.join(row)
+            for row in (
+                ("1-12345", "ASTER HOLDINGS INC.", "Delaware", "12-3456789"),
+                ("1-98765", subsidiary.upper(), "New York", "98-7654321"),
+            )
+        )
+        bodies = (
+            (
+                "external-alpha",
+                "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\nFORM 10-K\nCommission\nFile Number\n"
+                "Exact Name of Registrant\nas Specified In Its Charter\nState or Other Jurisdiction of\n"
+                "Incorporation or Organization\nIRS Employer\nIdentification Number\n" + table + "\n"
+                "Securities registered pursuant to Section 12(b) of the Act:\n"
+                "Title of each class Trading Symbol Name of Exchange\nCommon Stock AST NASDAQ\n"
+                "Securities registered pursuant to Section 12(g): None",
+            ),
+            (
+                "external-alpha",
+                "Aster Holdings Inc.\nConsolidated Balance Sheets\n"
+                "2030 Current assets 500. Total assets 1000. 2029 Current assets 480. Total assets 950.",
+            ),
+            (
+                "external-alpha",
+                "Aster Holdings Inc.\nConsolidated Balance Sheets\n"
+                "2030 Current liabilities 250. Total liabilities 600. 2029 Current liabilities 260. Total liabilities 580.",
+            ),
+            (
+                "external-alpha",
+                f"{subsidiary}\nConsolidated Balance Sheets\n"
+                "2030 Current assets 450. Total assets 900. 2029 Current assets 400. Total assets 850.",
+            ),
+            (
+                "external-alpha",
+                f"{subsidiary}\nConsolidated Balance Sheets\n"
+                "2030 Current liabilities 220. Total liabilities 550. Stockholders equity 350. "
+                "2029 Current liabilities 240. Total liabilities 520. Stockholders equity 330.",
+            ),
+            (
+                "external-beta",
+                "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\nFORM 10-K\n"
+                "Commission File Number: 12345\nLINDEN CORPORATION\n"
+                "Securities registered pursuant to Section 12(b) of the Act:\n"
+                "Title of each class Trading Symbol Name of Exchange\nCommon Stock LND NASDAQ\n"
+                "Securities registered pursuant to Section 12(g): None",
+            ),
+            (
+                "external-beta",
+                "Linden Corporation\nConsolidated Balance Sheets\n2030 Current assets 150. Current liabilities 100. "
+                "2029 Current assets 140. Current liabilities 90.",
+            ),
+        )
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Joint filing", summary="Co-registrant comparisons", idempotency_key="joint")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, (document, body) in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id=document, document_sha256="a" * 64, page_number=number, text=body)
+                )
+                locations[number] = source.name
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            for issuer, numbers in (("Aster Holdings", {2, 3, 7}), (subsidiary, {4, 5, 7})):
+                question = f"Compare the current ratio for {issuer} and Linden in 2030."
+                citations = await search_pdf_pages(memory, question, 3)
+                found = {
+                    ref.source_id
+                    for citation in citations
+                    for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
+                }
+                assert len(citations) == 3 and found == {locations[number] for number in numbers}
+                assert citations == await search_pdf_pages(memory, question, 3)
 
     asyncio.run(run())
 

@@ -192,7 +192,7 @@ _CONCEPTS = (
 _METRICS = (
     (r"\b(?:current ratio|working capital)\b", ("current assets", "current liabilities"), ("balance",)),
     (r"\b(?:quick ratio|acid test)\b", ("cash", "receivables", "current liabilities"), ("balance",)),
-    (r"\b(?:return on (?:average )?assets|roa)\b", ("net income", "total assets"), ("income", "balance")),
+    (r"\b(?:return on (?:average )?(?:total )?assets|roa)\b", ("net income", "total assets"), ("income", "balance")),
     (r"\b(?:return on (?:average )?equity|roe)\b", ("net income", "shareholders equity"), ("income", "balance")),
     (
         r"\b(?:return on invested capital|roic)\b",
@@ -229,7 +229,9 @@ _METRICS = (
     (r"\boperating margin\b", ("operating income", "operating profit", "revenue"), ("income",)),
     (r"\binterest coverage\b", ("operating income", "interest expense"), ("income",)),
     (
-        r"\b(?:capex|capital (?:expenditures?|spending|investment))\b",
+        r"\b(?:capex|capital (?:expenditures?|spending|investment)|free cash flows?)\b|"
+        r"\bcash\b(?=.{0,160}\b(?:after|less|minus|net of)\b)"
+        r"(?=.{0,160}\b(?:capital|reinvest\w*|property|equipment|fixed assets)\b)",
         ("purchases of property", "property plant equipment", "investing activities"),
         ("cash",),
     ),
@@ -821,21 +823,22 @@ def _company_name(document: str) -> str:
     )
 
 
-def _registered_issuer(body: str) -> str | None:
-    """Read the filing's own issuer, independently of its caller-assigned ID.
+def _registered_issuers(body: str) -> tuple[str, ...]:
+    """Read the filing's own issuers, independently of its caller-assigned ID.
 
     Restrict extraction to the cover's commission-file header and registered
     securities section. A company mentioned in a note is not the report issuer.
     """
     if not re.search(r"securities\s+and\s+exchange\s+commission", body, re.I):
-        return None
+        return ()
     securities = re.search(r"securities registered\s+(?:pursuant to|under)\s+section\s+12\s*\(b\)", body, re.I)
     if securities is None:
-        return None
+        return ()
     header = body[: securities.start()]
     filing = re.search(r"^\s*commission\s+file\s+(?:numbers?|no\.?)\b[^\n]*\n", header, re.I | re.M)
     if filing is None:
-        return None
+        return ()
+    names: set[str] = set()
     name_block = header[filing.end() : filing.end() + 500]
     # The filing number and legal name can each wrap across physical lines.
     name_block = re.sub(r"\A(?:\s*[\d.-]+\s*\n)+", "", name_block)
@@ -849,8 +852,25 @@ def _registered_issuer(body: str) -> str | None:
         )
         exact_label = re.match(r"\s*\(?exact\s+name\s+of\s+registrant\b", "\n".join(lines[index + 1 : index + 4]), re.I)
         if (legal_suffix or exact_label) and re.fullmatch(r"[\w &.,'\u2019-]{2,160}", name):
-            return name if _company_name(re.sub(r"\.(?:com|net|org)\b", "", name, flags=re.I)) else None
-    return None
+            if _company_name(re.sub(r"\.(?:com|net|org)\b", "", name, flags=re.I)):
+                names.add(name)
+            break
+    # Joint filings can place all registrants in a table: file number, legal
+    # name, state and employer ID. Extraction may retain rows or wrap cells.
+    table = header[filing.end() :]
+    if re.search(r"\bexact\s+name\s+of\s+registrant\b", table, re.I) and re.search(
+        r"\bemployer\s+identification\b", table, re.I
+    ):
+        for row in re.finditer(r"(?m)^[ \t]*\d{1,6}-\d{1,8}[ \t\r\n]+", table):
+            legal = re.match(
+                r"(?=[^\s]*[a-z])([\w &.,'\u2019\r\n-]{2,160}?\b"
+                r"(?:inc(?:orporated)?|corp(?:oration)?|company|co|plc|ltd|limited|llc|holdings|group)\.?)(?!\w)",
+                table[row.end() :],
+                re.I,
+            )
+            if legal:
+                names.add(" ".join(legal[1].split()))
+    return tuple(sorted(names))
 
 
 def _common_stock_symbol(body: str) -> str | None:
@@ -947,19 +967,36 @@ def _document_issuer_names(pages: list[tuple[str, str]]) -> dict[str, frozenset[
     registered: dict[str, dict[tuple[str, ...], str]] = {}
     for document, body in pages:
         bodies.setdefault(document, []).append(body)
-        if issuer := _registered_issuer(body):
+        for issuer in _registered_issuers(body):
             registered.setdefault(document, {})[_legal_issuer_words(issuer)] = issuer
     result: dict[str, frozenset[str]] = {}
     for document, issuers in registered.items():
-        # Conflicting covers cannot make source ordering choose the issuer.
-        if len(issuers) != 1:
-            continue
-        issuer = next(iter(issuers.values()))
-        names = {_company_name(re.sub(r"\.(?:com|net|org)\b", "", issuer, flags=re.I))}
-        for body in bodies[document]:
-            names.update(_declared_issuer_names(body, issuer))
+        # Co-registrants are all subjects of the same filing. Retain each one
+        # so an explicit comparison cannot silently exclude the joint report.
+        names: set[str] = set()
+        for issuer in issuers.values():
+            names.add(_company_name(re.sub(r"\.(?:com|net|org)\b", "", issuer, flags=re.I)))
+            for body in bodies[document]:
+                names.update(_declared_issuer_names(body, issuer))
         result[document] = frozenset(names)
     return result
+
+
+def _mentioned_issuer_names(text: str, names: frozenset[str]) -> frozenset[str]:
+    """Keep complete company mentions, preferring the longest overlapping name."""
+
+    tokens = re.findall(r"[a-z0-9]+", _normalize_question(text))
+    spans = [
+        (start, end, name)
+        for start in range(len(tokens))
+        for end in range(start + 1, len(tokens) + 1)
+        if (name := "".join(tokens[start:end])) in names
+    ]
+    return frozenset(
+        name
+        for start, end, name in spans
+        if not any(left <= start and end <= right and right - left > end - start for left, right, _ in spans)
+    )
 
 
 def _target_documents(
@@ -1318,6 +1355,9 @@ def _rank_pages(
     company_names = _document_issuer_names([
         (_document_name(hit), hit.text.partition("\n")[2]) for hit in hits if _document_name(hit) in targets
     ])
+    requested_issuers = {
+        document: _mentioned_issuer_names(question, names) for document, names in company_names.items()
+    }
     companies.update(name for names in company_names.values() for name in names)
     subject_terms = {
         _stem(word)
@@ -1361,7 +1401,13 @@ def _rank_pages(
         for kind, quality in titles[identity].items():
             heading = _STATEMENT_HEADINGS[kind].search(body.casefold())
             subject = "\n".join(body[: heading.start()].splitlines()[-4:]) if heading else ""
-            if quality and _target_documents(frozenset({document}), subject):
+            requested = requested_issuers.get(document, frozenset())
+            subject_matches = (
+                requested & _mentioned_issuer_names(subject, company_names[document])
+                if requested
+                else _target_documents(frozenset({document}), subject)
+            )
+            if quality and subject_matches:
                 # Distinguish a parent's statement from its subsidiary's statement
                 # in a combined report, before lexical repetition breaks the tie.
                 titles[identity][kind] += 4
