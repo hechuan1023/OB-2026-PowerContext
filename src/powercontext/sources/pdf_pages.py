@@ -192,8 +192,25 @@ _CONCEPTS = (
 # Metric names often do not occur on the pages containing their operands. These
 # are financial definitions, not document-specific questions or answer lookups.
 _METRICS = (
-    (r"\b(?:current ratio|working capital)\b", ("current assets", "current liabilities"), ("balance",)),
+    (r"\btotal assets\b", ("total assets",), ("balance",)),
+    (
+        r"\b(?:shareholders|stockholders)['\u2019]?\s+(?:equity|investment)\b",
+        ("shareholders equity", "stockholders equity", "stockholders investment", "shareholders investment"),
+        ("balance",),
+    ),
+    (
+        r"\b(?:current ratio|working capital)\b|"
+        r"\b(?:liquid|short term|near term)\b(?=.{0,160}\b(?:resources|assets|cash)\b)"
+        r"(?=.{0,160}\b(?:debts?|payables?|obligations?|liabilities)\b)",
+        ("current assets", "current liabilities"),
+        ("balance",),
+    ),
     (r"\b(?:quick ratio|acid test)\b", ("cash", "receivables", "current liabilities"), ("balance",)),
+    (
+        r"\bcash\b(?=.{0,120}\b(?:collectible|customer balances|trade debtors)\b)",
+        ("cash and cash equivalents", "accounts receivable", "trade receivables"),
+        ("balance",),
+    ),
     (r"\b(?:return on (?:average )?(?:total )?assets|roa)\b", ("net income", "total assets"), ("income", "balance")),
     (r"\b(?:return on (?:average )?equity|roe)\b", ("net income", "shareholders equity"), ("income", "balance")),
     (
@@ -228,7 +245,7 @@ _METRICS = (
     (r"\bdebt (?:to )?equity\b", ("debt", "total liabilities", "shareholders equity"), ("balance",)),
     (r"\b(?:gross margin|gross profit)\b", ("net sales", "revenue", "cost of sales"), ("income",)),
     (r"\b(?:net margin|net profit margin)\b", ("net income", "net sales", "revenue"), ("income",)),
-    (r"\boperating margin\b", ("operating income", "operating profit", "revenue"), ("income",)),
+    (r"\b(?:operating|ebit) margin\b", ("operating income", "operating profit", "revenue"), ("income",)),
     (r"\binterest coverage\b", ("operating income", "interest expense"), ("income",)),
     (
         r"\b(?:capex|capital (?:expenditures?|spending|investment)|free cash flows?)\b|"
@@ -245,6 +262,11 @@ _METRIC_PATTERNS = tuple((re.compile(pattern), phrases, kinds) for pattern, phra
 # Offline accounting terminology, applied to any document. Expansions help
 # natural-language questions reach notes whose wording differs from the query.
 _NOTE_CONCEPTS = (
+    (
+        r"\b(?:streaming|subscription)\b(?=.{0,160}\b(?:programs?|shows?|films?|movies?|programming)\b)|"
+        r"\b(?:programs?|shows?|films?|movies?|programming)\b(?=.{0,160}\b(?:streaming|subscription|view(?:ed|ing))\b)",
+        ("content assets", "additions to content assets", "amortization of content assets", "licensed content"),
+    ),
     (
         r"\b(?:product warrant(?:y|ies)|warranty liabilities)\b|"
         r"\b(?:repair\w*|replac\w*)\b.{0,70}\b(?:faulty|defective|defects?)\b",
@@ -809,7 +831,11 @@ def _primary_statement_kinds(question: str) -> tuple[str, ...]:
         kinds.extend(("income", "cash"))
     if re.search(r"\b(?:cash flow statements?|cash flows? from|cash.*operating activities)\b", normalized):
         kinds.append("cash")
-    if re.search(r"\b(?:total revenue|net income|operating profit|pnl)\b", normalized):
+    if re.search(r"\b(?:total revenue|net income|net earnings|operating profit|pnl)\b", normalized):
+        kinds.append("income")
+    if re.search(r"\boperating income\b", normalized) and not re.search(
+        r"\b(?:segment|division|business unit)s?\b", normalized
+    ):
         kinds.append("income")
     # A calculation can describe an operand without using its accounting label.
     # Keep the main statements as a small complementary evidence pool instead
@@ -1539,7 +1565,9 @@ def _statement_subject_groups(
     subjects: dict[tuple[str, str, str], dict[str, frozenset[str]]],
 ) -> list[list[MemoryHit]]:
     if not targets:
-        return [ranked]
+        # Experimental bounded reservation in the order of first relevant hit.
+        documents = list(dict.fromkeys(_document_name(hit) for hit in ranked))[:4]
+        return [[hit for hit in ranked if _document_name(hit) == document] for document in documents]
     result = []
     for document in sorted(targets):
         hits = [hit for hit in ranked if _document_name(hit) == document]
@@ -1618,6 +1646,47 @@ def _statement_anchors(
                             ],
                         )
                         anchors.append(complement)
+    return anchors
+
+
+def _document_affinity(hits: list[MemoryHit], tokens: list[list[str]], question: str) -> dict[str, float]:
+    """Score report-level query evidence without excluding any report."""
+    query_terms = {
+        _stem(term) for term in _WORDS.findall(question.casefold()) if term not in _STOPWORDS and not term.isdigit()
+    }
+    doc_pages: dict[str, Counter[str]] = {}
+    for hit, words in zip(hits, tokens, strict=True):
+        counts = doc_pages.setdefault(_document_name(hit), Counter())
+        counts.update(query_terms.intersection(words))
+    document_frequency = Counter(term for counts in doc_pages.values() for term in counts)
+    return {
+        document: sum(
+            math.log1p((len(doc_pages) - document_frequency[term] + 0.5) / (document_frequency[term] + 0.5))
+            * math.log1p(count)
+            for term, count in counts.items()
+        )
+        for document, counts in doc_pages.items()
+    }
+
+
+def _select_statement_anchors(
+    scores: list[tuple[float, MemoryHit]],
+    hits: list[MemoryHit],
+    tokens: list[list[str]],
+    titles: dict[tuple[str, str, str], dict[str, int]],
+    question: str,
+    targets: frozenset[str],
+    issuers: dict[str, tuple[frozenset[str], ...]],
+    subjects: dict[tuple[str, str, str], dict[str, frozenset[str]]],
+    limit: int,
+) -> list[MemoryHit]:
+    ranked = [hit for _, hit in scores]
+    if not targets:
+        document_score = _document_affinity(hits, tokens, question)
+        ranked.sort(key=lambda hit: -document_score[_document_name(hit)])
+    anchors = _statement_anchors(ranked, titles, question, targets, issuers, subjects)
+    if not targets:
+        anchors = anchors[: min(4, max(1, limit // 3))]
     return anchors
 
 
@@ -1729,7 +1798,9 @@ def _rank_pages(
         score = (score + phrase_score) * (1.0 + 0.5 * entity_overlap) + 4.0 * votes.get(identity, 0.0)
         scores.append((score, hit))
     scores.sort(key=lambda item: (-item[0], item[1].memory_ref.artifact_id, item[1].entry_id))
-    anchors = _statement_anchors([hit for _, hit in scores], titles, question, targets, requested_issuers, subjects)
+    anchors = _select_statement_anchors(
+        scores, hits, tokens, titles, question, targets, requested_issuers, subjects, limit
+    )
     return _diverse_pages(scores, anchors, limit, question)
 
 
