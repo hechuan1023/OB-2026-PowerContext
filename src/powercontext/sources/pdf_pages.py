@@ -1243,6 +1243,41 @@ def _expand_document_terms(hits: list[MemoryHit], question: str, weights: dict[s
     return weights
 
 
+def _cash_table_totals(body: str) -> dict[str, tuple[str, ...]]:
+    """Read numeric cash-flow totals only when a cash reconciliation is present."""
+
+    amount = r"\(?[-\u2212]?\d[\d,]*(?:\.\d+)?\)?|[\u2014\u2013-]"
+    column = rf"(?:[$\u00a3\u20ac][ \t]*)?(?:{amount})"
+    change = (
+        r"(?:change|\(?increase\)?(?:(?:\s*/\s*|\s+)\(?decrease\)?)?|"
+        r"\(?decrease\)?(?:(?:\s*/\s*|\s+)\(?increase\)?)?)"
+    )
+    row = re.compile(
+        r"^[ \t]*(?:net\s+cash(?:\s+flows?)?\s+(?:(?:provided|generated|used)\s+(?:by|in|from)|from)"
+        r"(?:(?:\s*/\s*|\s+)\((?:used|provided)\s+(?:in|by)\))?\s+"
+        rf"(?P<section>operating|investing|financing)\s+activities|(?:net\s+)?{change}\s+in\s+cash"
+        r"(?:,?\s+(?:and\s+)?cash\s+equivalents)?"
+        r"(?:,?\s+(?:and\s+)?restricted\s+cash(?:\s+and\s+cash\s+equivalents)?)?)"
+        rf"[ \t]+(?P<amounts>{column}(?:[ \t]+{column})*)[ \t]*$",
+        re.I | re.M,
+    )
+    totals: dict[str, tuple[str, ...]] = {}
+    for match in row.finditer(body):
+        key = match["section"] or "change"
+        values = []
+        for value in re.findall(amount, match["amounts"]):
+            value = (
+                "0"
+                if value in {"\u2014", "\u2013", "-"}
+                else value.replace(",", "").replace("\u2212", "-").replace("(", "-").replace(")", "")
+            )
+            if "." in value:
+                value = value.rstrip("0").rstrip(".")
+            values.append("0" if value == "-0" else value)
+        totals[key.casefold()] = totals.get(key.casefold(), ()) + tuple(values)
+    return totals if "change" in totals and len(totals) > 1 else {}
+
+
 def _diverse_pages(
     scores: list[tuple[float, MemoryHit]], anchors: list[MemoryHit], limit: int, question: str
 ) -> list[MemoryHit]:
@@ -1262,6 +1297,7 @@ def _diverse_pages(
         for _, hit in scores
     ]
     documents = [_document_name(hit) for _, hit in scores]
+    cash_totals = [_cash_table_totals(hit.text.partition("\n")[2]) for _, hit in scores]
     requested_years = frozenset(re.findall(r"\b(?:19|20)\d{2}\b", question))
     years = [
         requested_years.intersection(re.findall(r"\b(?:19|20)\d{2}\b", hit.text.partition("\n")[2]))
@@ -1279,6 +1315,12 @@ def _diverse_pages(
             covered.setdefault(documents[selected], set()).update(years[selected])
             for index in remaining:
                 if documents[index] == documents[selected]:
+                    shared_totals = cash_totals[index].keys() & cash_totals[selected].keys()
+                    if any(cash_totals[index][key] != cash_totals[selected][key] for key in shared_totals):
+                        # Two cash-flow tables with different amounts are separate
+                        # evidence even when their line-item vocabulary is identical.
+                        # Ordinary numeric mentions and page numbers do not qualify.
+                        continue
                     union = features[index] | features[selected]
                     similarity = len(features[index] & features[selected]) / len(union) if union else 0.0
                     # Related evidence pages legitimately share terminology.
@@ -1492,9 +1534,24 @@ def _rank_pages(
     search_bodies = [_normalize_country_names(hit.text.partition("\n")[2]).casefold() for hit in hits]
     tokens = [[_stem(word) for word in _WORDS.findall(body)] for body in search_bodies]
     terms = [Counter(words) for words in tokens]
-    frequency = Counter(term for counts in terms for term in counts)
+    # Repeated cash tables must not make their labels uninformative merely
+    # because copies have different numeric columns, formatting or page numbers.
+    # Every page remains a candidate. Only confident cash-reconciliation tables
+    # share one lexical-frequency contribution for identical nonnumeric wording.
+    statistics = []
+    table_signatures = set()
+    for counts, body in zip(terms, search_bodies, strict=True):
+        if _cash_table_totals(body):
+            signature = tuple(sorted((term, count) for term, count in counts.items() if not term.isdigit()))
+            if signature in table_signatures:
+                continue
+            table_signatures.add(signature)
+        statistics.append(counts)
+    frequency = Counter(term for counts in statistics for term in counts)
     average_length = max(1.0, sum(sum(counts.values()) for counts in terms) / len(terms))
-    idf = {term: math.log(1.0 + (len(hits) - frequency[term] + 0.5) / (frequency[term] + 0.5)) for term in weights}
+    idf = {
+        term: math.log(1.0 + (len(statistics) - frequency[term] + 0.5) / (frequency[term] + 0.5)) for term in weights
+    }
     query_words = set(_WORDS.findall(question.casefold()))
     statement_kinds = _primary_statement_kinds(question)
     scores = []

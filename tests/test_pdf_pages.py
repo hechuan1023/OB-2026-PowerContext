@@ -2027,6 +2027,87 @@ def test_financing_and_pension_paraphrases_recall_exact_pages_after_restart(tmp_
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("repeated_table", [False, True])
+@pytest.mark.parametrize(
+    ("activity_label", "change_label"),
+    [
+        ("Net cash provided by financing activities", "Net change in cash and cash equivalents"),
+        ("Net cash provided by (used in) financing activities", "Net increase (decrease) in cash and cash equivalents"),
+        (
+            "Net cash provided by/(used in) financing activities",
+            "Net increase/(decrease) in cash and cash equivalents and restricted cash and cash equivalents",
+        ),
+        ("Net cash flows from financing activities", "(Decrease)/Increase in cash and cash equivalents"),
+    ],
+)
+def test_numeric_cash_tables_remain_distinct_after_restart(
+    tmp_path: Path, repeated_table: bool, activity_label: str, change_label: str
+) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'numeric-tables.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        table = (
+            "Proceeds from issuance of long-term debt {proceeds}\n"
+            "Repayment of long-term debt {repayment}\n"
+            f"{activity_label} {{financing}}\n"
+            f"{change_label} {{change}}"
+        )
+        bodies = (
+            table.format(proceeds="500 400", repayment="(200) (100)", financing="300 300", change="50 40"),
+            table.format(proceeds="600 450", repayment="(400) (200)", financing="200 250", change="60 45"),
+            "Liquidity and capital resources\nDebt maturity schedules govern borrowing facilities and working capital. "
+            "Management reviews repayment obligations, capital resources and available credit.",
+        )
+        if repeated_table:
+            bodies += (
+                table.format(
+                    proceeds="$500.00 $400.0",
+                    repayment="\u2212200.0 \u2212100.00",
+                    financing="$300.0 $300.00",
+                    change="$50.00 $40.0",
+                )
+                + "\n4",
+            )
+        expected = set()
+        first_table_copies = set()
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Numeric tables", summary="Distinct cash flows", idempotency_key="numeric-tables")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, body in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id="combined-report", document_sha256="c" * 64, page_number=number, text=body)
+                )
+                if number <= 2:
+                    expected.add(source.name)
+                if number in {1, 4}:
+                    first_table_copies.add(source.name)
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            question = "Compare the long-term debt issuance, repayments and financing cash flows in both tables."
+            citations = await search_pdf_pages(memory, question, 2)
+            found = set()
+            for citation in citations:
+                entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                found.update(ref.source_id for ref in entry.sources)
+                assert entry.text in {f"combined-report\n{body}" for index, body in enumerate(bodies) if index != 2}
+            assert len(citations) == len(found) == 2
+            assert expected - first_table_copies <= found and found & first_table_copies
+            assert citations == await search_pdf_pages(memory, question, 2)
+
+    asyncio.run(run())
+
+
 def test_distinct_cash_totals_on_similar_continuations_are_both_retrieved(tmp_path: Path) -> None:
     async def run() -> None:
         config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'cash-totals.db'}"))
