@@ -965,6 +965,64 @@ def test_financial_ratios_recall_operands_without_metric_names_on_the_pages(tmp_
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How many times did Riverton turn its average inventory during 2030?",
+        "Using average opening and closing inventories, how frequently did Riverton sell through "
+        "its merchandise inventory in 2030?",
+    ],
+)
+def test_inventory_frequency_questions_keep_both_operands(tmp_path: Path, question: str) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'inventory.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        bodies = (
+            "Consolidated Statements of Income\n2030 Net sales 1000. Cost of sales 700. Net income 100.",
+            "Consolidated Balance Sheets\n2030 Inventory 180. Current assets 400. Total assets 900. "
+            "2029 Inventory 160. Current assets 380. Total assets 850. Current liabilities 200.",
+            "Inventory management review. We turn average inventory through frequent sales of merchandise. "
+            "Opening and closing inventories are monitored to determine how frequently merchandise sells.",
+            "Merchandise inventory review. We sell through inventories using promotions and replenishment. "
+            "We monitor average opening and closing inventory balances throughout 2030.",
+        )
+        expected = set()
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Inventory", summary="Frequency operands", idempotency_key="inventory")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, body in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(
+                        document_id="RIVERTON_2030_10K", document_sha256="b" * 64, page_number=number, text=body
+                    )
+                )
+                if number in {1, 2}:
+                    expected.add(source.name)
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            citations = await search_pdf_pages(memory, question, 2)
+            found = {
+                ref.source_id
+                for citation in citations
+                for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
+            }
+            assert len(citations) == 2 and found == expected
+            assert citations == await search_pdf_pages(memory, question, 2)
+
+    asyncio.run(run())
+
+
 def test_note_paraphrases_and_document_comparisons_after_restart(tmp_path: Path) -> None:
     async def run() -> None:
         config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'notes.db'}"))
@@ -1263,6 +1321,104 @@ def test_opaque_document_ids_use_registered_issuers_after_restart(
                 entry = (await memory.get(GetMemoryEntryRequest(citation=citations[0]))).entry
                 assert entry.sources[0].source_id == identities[expected], subject
                 assert citations == await search_pdf_pages(memory, question, 1)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "introduction",
+    [
+        "Briar Wholesale Corporation (Briar or the Company)",
+        'Briar Wholesale Corporation ("Briar", "we", "our Company" or "the Firm")',
+        'Briar Wholesale Corporation and subsidiaries (collectively, "Briar")',
+    ],
+)
+def test_report_defined_company_names_preserve_both_comparison_subjects(tmp_path: Path, introduction: str) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'aliases.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        cover = (
+            "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\nFORM 10-K\n"
+            "Commission File Number: 12345\n{issuer}\n"
+            "Securities registered pursuant to Section 12(b) of the Act:\n"
+            "Title of each class Trading Symbol Name of Exchange\n"
+            "Common Stock, par value $0.01 {symbol} NASDAQ\n"
+            "Securities registered pursuant to Section 12(g): None"
+        )
+        bodies = (
+            ("external-alpha", cover.format(issuer="BRIAR WHOLESALE CORPORATION", symbol="BRI")),
+            (
+                "external-alpha",
+                introduction + " operates warehouses.\nConsolidated Balance Sheets\n"
+                "2030 Current assets 500. Current liabilities 250. 2029 Current assets 480. Current liabilities 260.\n"
+                'Briar Wholesale Corporation (the "Parent Company") holds subsidiary shares. '
+                'Briar Wholesale Corporation ("BW" or the Company) is our legal issuer.',
+            ),
+            ("external-beta", cover.format(issuer="LINDEN CORPORATION", symbol="LND")),
+            (
+                "external-beta",
+                "Consolidated Balance Sheets\n2030 Current assets 150. Current liabilities 100. "
+                "2029 Current assets 140. Current liabilities 90. Linden is also a parent company.\n"
+                "Our competitor Briar Wholesale Corporation (Briar or the Company) has a warehouse business. "
+                'An investee Linden Financial Corporation ("Briar" or the Company) operates independently.',
+            ),
+        )
+        expected = set()
+        first_sources = set()
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Company names", summary="Comparison evidence", idempotency_key="aliases")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, (document, body) in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id=document, document_sha256="a" * 64, page_number=number, text=body)
+                )
+                if number in {2, 4}:
+                    expected.add(source.name)
+                if document == "external-alpha":
+                    first_sources.add(source.name)
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            question = "Compare Briar and Linden current ratios at the end of 2030."
+            citations = await search_pdf_pages(memory, question, 2)
+            found = {
+                ref.source_id
+                for citation in citations
+                for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
+            }
+            assert len(citations) == 2 and found == expected
+            assert citations == await search_pdf_pages(memory, question, 2)
+            initials = await search_pdf_pages(memory, "Compare BW and Linden current ratios at the end of 2030.", 2)
+            found = {
+                ref.source_id
+                for citation in initials
+                for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
+            }
+            assert len(initials) == 2 and found == expected
+            citations = await search_pdf_pages(memory, "What was Briar current ratio in 2030?", 20)
+            found = {
+                ref.source_id
+                for citation in citations
+                for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
+            }
+            assert found == first_sources and len(citations) == 2
+            citations = await search_pdf_pages(memory, "Compare all parent companies' current ratios in 2030.", 20)
+            found = {
+                ref.source_id
+                for citation in citations
+                for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
+            }
+            assert expected <= found
 
     asyncio.run(run())
 

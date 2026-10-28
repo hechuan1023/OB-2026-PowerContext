@@ -206,7 +206,9 @@ _METRICS = (
         ("income", "balance"),
     ),
     (
-        r"\b(?:days (?:of )?inventory(?: outstanding)?|dio|inventory turnover)\b",
+        r"\b(?:days (?:of )?inventory(?: outstanding)?|dio|inventor(?:y|ies) (?:turnover|turns?))\b|"
+        r"\bhow (?:many times|frequently|often)\b(?=.{0,160}\binventor(?:y|ies)\b)"
+        r".{0,120}\b(?:turn(?:s|ed|ing)?|sell(?:s|ing)?|sold)\b",
         ("cost of sales", "cost of goods sold", "inventories"),
         ("income", "balance"),
     ),
@@ -847,7 +849,7 @@ def _registered_issuer(body: str) -> str | None:
         )
         exact_label = re.match(r"\s*\(?exact\s+name\s+of\s+registrant\b", "\n".join(lines[index + 1 : index + 4]), re.I)
         if (legal_suffix or exact_label) and re.fullmatch(r"[\w &.,'\u2019-]{2,160}", name):
-            return _company_name(re.sub(r"\.(?:com|net|org)\b", "", name, flags=re.I)) or None
+            return name if _company_name(re.sub(r"\.(?:com|net|org)\b", "", name, flags=re.I)) else None
     return None
 
 
@@ -881,11 +883,90 @@ def _common_stock_symbol(body: str) -> str | None:
     return symbol[1] if symbol else None
 
 
+def _company_alias_terms(definition: str) -> set[str]:
+    quotes = re.compile(r'"([^"\n]{1,80})"|“([^”\n]{1,80})”|‘([^’\n]{1,80})’|\'([^\'\n]{1,80})\'')  # noqa: RUF001
+    quoted = [next(value for value in match.groups() if value is not None) for match in quotes.finditer(definition)]
+    unquoted = re.split(r"\s+(?:or|and)\s+|[,;]", quotes.sub("", definition), flags=re.I)
+    names: set[str] = set()
+    generic = {"the", "we", "us", "our", "ours", "ourselves", "company", "group", "firm", "registrant", "collectively"}
+    for raw, explicit in [(name, True) for name in quoted] + [(name, False) for name in unquoted]:
+        name = raw.strip(" ,;\t")
+        if not re.fullmatch(r"[\w &.'\u2019-]{1,80}", name) or len(name.split()) > 6:
+            continue
+        if set(re.findall(r"[a-z0-9]+", name.casefold())) <= generic or (not explicit and not name[0].isupper()):
+            continue
+        canonical = _company_name(name)
+        if len(canonical) >= 2:
+            names.add(canonical)
+    return names
+
+
+def _legal_issuer_words(name: str) -> tuple[str, ...]:
+    name = re.sub(r"\.(?:com|net|org)\b", "", name, flags=re.I)
+    words = re.findall(r"[a-z0-9]+", name.casefold())
+    if words and words[0] == "the":
+        words.pop(0)
+    suffixes = {"inc", "incorporated", "corp", "corporation", "co", "company", "plc", "ltd", "limited", "llc"}
+    while words and words[-1] in suffixes:
+        words.pop()
+    return tuple(words)
+
+
+def _declared_issuer_names(body: str, issuer: str) -> set[str]:
+    """Accept a report's own short names, linked to its registered issuer."""
+
+    compact = " ".join(body.split())
+    legal_name = _legal_issuer_words(issuer)
+    # Role and plan labels can follow "... of <issuer>" too. Accept only
+    # declared leading company names or initials, not every quoted label.
+    related = {_company_name(" ".join(legal_name[:end])) for end in range(1, len(legal_name) + 1)}
+    related.add("".join(word[0] for word in legal_name))
+    names: set[str] = set()
+    for match in re.finditer(r"\(([^()]{1,160})\)", compact):
+        definition = match[1]
+        if not re.search(r'["“‘\']|\b(?:or|collectively)\b', definition, re.I):  # noqa: RUF001
+            continue
+        preceding = compact[max(0, match.start() - 180) : match.start()]
+        preceding = re.sub(
+            r"\s+(?:and|together with)(?:\s+(?:its|all|the|consolidated))*\s+subsidiaries\s*$",
+            "",
+            preceding,
+            flags=re.I,
+        )
+        words = re.findall(r"[a-z0-9]+", preceding.casefold())
+        if any(
+            _legal_issuer_words(" ".join(words[start:])) == legal_name
+            for start in range(max(0, len(words) - 12), len(words))
+        ):
+            names.update(_company_alias_terms(definition) & related)
+    return names
+
+
+def _document_issuer_names(pages: list[tuple[str, str]]) -> dict[str, frozenset[str]]:
+    bodies: dict[str, list[str]] = {}
+    registered: dict[str, dict[tuple[str, ...], str]] = {}
+    for document, body in pages:
+        bodies.setdefault(document, []).append(body)
+        if issuer := _registered_issuer(body):
+            registered.setdefault(document, {})[_legal_issuer_words(issuer)] = issuer
+    result: dict[str, frozenset[str]] = {}
+    for document, issuers in registered.items():
+        # Conflicting covers cannot make source ordering choose the issuer.
+        if len(issuers) != 1:
+            continue
+        issuer = next(iter(issuers.values()))
+        names = {_company_name(re.sub(r"\.(?:com|net|org)\b", "", issuer, flags=re.I))}
+        for body in bodies[document]:
+            names.update(_declared_issuer_names(body, issuer))
+        result[document] = frozenset(names)
+    return result
+
+
 def _target_documents(
     documents: frozenset[str],
     question: str,
     symbols: dict[str, str] | None = None,
-    issuers: dict[str, str] | None = None,
+    issuers: dict[str, frozenset[str]] | None = None,
 ) -> frozenset[str]:
     """Restrict only explicit complete entities, retaining comparison subjects.
 
@@ -910,9 +991,10 @@ def _target_documents(
     for name, company in companies.items():
         if name in symbol_documents or (len(company) >= 2 and company in mentions):
             matched.setdefault(company or name, set()).add(name)
-    for name, issuer in (issuers or {}).items():
-        if len(issuer) >= 2 and issuer in mentions:
-            matched.setdefault(issuer, set()).add(name)
+    for name, names in (issuers or {}).items():
+        for issuer in names:
+            if len(issuer) >= 2 and issuer in mentions:
+                matched.setdefault(issuer, set()).add(name)
     selected: set[str] = set()
     for names in matched.values():
         dated = [name for name in names if years.intersection(_WORDS.findall(name.casefold()))]
@@ -939,13 +1021,13 @@ async def _recall_documents(memory: Any, documents: frozenset[str], candidate_li
 
 async def _pdf_inventory(
     memory: Any,
-) -> tuple[dict[tuple[str, str, str], str], int, dict[str, str], dict[str, str]]:
+) -> tuple[dict[tuple[str, str, str], str], int, dict[str, str], dict[str, frozenset[str]]]:
     # Listing bounds the pool and identifies PDF entries. Candidate citations
     # still come exclusively from public Memory.search results.
     stored = await memory.list()
     inventory: dict[tuple[str, str, str], str] = {}
     symbols: dict[str, set[str]] = {}
-    issuers: dict[str, set[str]] = {}
+    pages: list[tuple[str, str]] = []
     for row in stored.entries:
         if not any(ref.source_type == "pdf-page" for ref in row.entry.sources):
             continue
@@ -955,15 +1037,13 @@ async def _pdf_inventory(
         symbol = _common_stock_symbol(body)
         if symbol:
             symbols.setdefault(document, set()).add(symbol)
-        issuer = _registered_issuer(body)
-        if issuer:
-            issuers.setdefault(document, set()).add(issuer)
+        pages.append((document, body))
     # Conflicting disclosures must not turn ingestion order into entity selection.
     return (
         inventory,
         len(stored.entries),
         {doc: next(iter(values)) for doc, values in symbols.items() if len(values) == 1},
-        {doc: next(iter(values)) for doc, values in issuers.items() if len(values) == 1},
+        _document_issuer_names(pages),
     )
 
 
@@ -1235,12 +1315,10 @@ def _rank_pages(
     # its name in BM25 can favor covers and boilerplate over a lease/segment note.
     query_tokens = re.findall(r"[a-z0-9]+", _normalize_question(question))
     companies = {_company_name(document) for document in targets}
-    companies.update(
-        issuer
-        for hit in hits
-        if _document_name(hit) in targets
-        if (issuer := _registered_issuer(hit.text.partition("\n")[2])) is not None
-    )
+    company_names = _document_issuer_names([
+        (_document_name(hit), hit.text.partition("\n")[2]) for hit in hits if _document_name(hit) in targets
+    ])
+    companies.update(name for names in company_names.values() for name in names)
     subject_terms = {
         _stem(word)
         for start in range(len(query_tokens))
