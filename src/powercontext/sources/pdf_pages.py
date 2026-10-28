@@ -1597,8 +1597,9 @@ def _statement_anchors(
     targets: frozenset[str],
     issuers: dict[str, tuple[frozenset[str], ...]],
     subjects: dict[tuple[str, str, str], dict[str, frozenset[str]]],
+    kinds: tuple[str, ...] | None = None,
 ) -> list[MemoryHit]:
-    statement_kinds = _primary_statement_kinds(question)
+    statement_kinds = _primary_statement_kinds(question) if kinds is None else kinds
     anchors: list[MemoryHit] = []
     # A compound question needs complementary pages. One high-frequency aspect
     # must not consume the whole result budget and crowd out another statement.
@@ -1655,14 +1656,29 @@ def _document_affinity(hits: list[MemoryHit], tokens: list[list[str]], question:
         _stem(term) for term in _WORDS.findall(question.casefold()) if term not in _STOPWORDS and not term.isdigit()
     }
     doc_pages: dict[str, Counter[str]] = {}
+    page_counts: Counter[str] = Counter()
     for hit, words in zip(hits, tokens, strict=True):
-        counts = doc_pages.setdefault(_document_name(hit), Counter())
-        counts.update(query_terms.intersection(words))
+        document = _document_name(hit)
+        page_counts[document] += 1
+        counts = doc_pages.setdefault(document, Counter())
+        # A negative description is not positive evidence that the document
+        # is the subject. Keep other sentences on the same page eligible.
+        positive: set[str] = set()
+        for sentence in re.split(r"[.!?;\n]+|\b(?:but|however|whereas|although)\b", _page_text(hit).casefold()):
+            sentence_words = _WORDS.findall(sentence)
+            if any(
+                word in {"never", "neither", "no"}
+                or (word == "not" and sentence_words[index + 1 : index + 2] != ["only"])
+                for index, word in enumerate(sentence_words)
+            ):
+                continue
+            positive.update(_stem(word) for word in sentence_words)
+        counts.update(query_terms.intersection(words).intersection(positive))
     document_frequency = Counter(term for counts in doc_pages.values() for term in counts)
     return {
         document: sum(
             math.log1p((len(doc_pages) - document_frequency[term] + 0.5) / (document_frequency[term] + 0.5))
-            * math.log1p(count)
+            * (1.0 + math.log1p(count / page_counts[document]))
             for term, count in counts.items()
         )
         for document, counts in doc_pages.items()
@@ -1684,9 +1700,25 @@ def _select_statement_anchors(
     if not targets:
         document_score = _document_affinity(hits, tokens, question)
         ranked.sort(key=lambda hit: -document_score[_document_name(hit)])
-    anchors = _statement_anchors(ranked, titles, question, targets, issuers, subjects)
-    if not targets:
-        anchors = anchors[: min(4, max(1, limit // 3))]
+    kinds = _primary_statement_kinds(question)
+    if targets or len(kinds) < 2:
+        anchors = _statement_anchors(ranked, titles, question, targets, issuers, subjects)
+        return anchors if targets else anchors[: min(4, max(1, limit // 3))]
+    # Unnamed multi-report questions should reserve space for each requested
+    # statement type before allocating additional pages to the same type.
+    groups = [_statement_anchors(ranked, titles, question, targets, issuers, subjects, (kind,)) for kind in kinds]
+    budget = min(4, limit, max(len(kinds), limit // 3))
+    anchors = []
+    while groups and len(anchors) < budget:
+        remaining = []
+        for group in groups:
+            while group and group[0] in anchors:
+                group.pop(0)
+            if group and len(anchors) < budget:
+                anchors.append(group.pop(0))
+            if group:
+                remaining.append(group)
+        groups = remaining
     return anchors
 
 

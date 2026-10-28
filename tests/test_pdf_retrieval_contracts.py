@@ -151,3 +151,100 @@ def test_two_unnamed_industry_subjects_at_limit_two(tmp_path: Path):
         ]
     results = asyncio.run(search(tmp_path, pages, "Compare net earnings of the two pharmaceutical businesses.", 2))
     assert set(results) == {("ALDER_2030_10K", 2), ("BIRCH_2030_10K", 2)}
+
+
+def test_distinct_subject_terms_survive_many_similar_report_pages(tmp_path: Path):
+    short = "REPORTSHORT_2030_10K"
+    pages = [
+        (short, 1, "Annual vaccine healthcare medicines company holding patent royalties."),
+        (short, 2, "Researcher Corporation\nConsolidated Statements of Income\nNet income 100"),
+    ]
+    for company in range(4):
+        document = f"REPORTLONG{company}_2030_10K"
+        pages.append((document, 1, f"Issuer {company}\nConsolidated Statements of Income\nAnnual net earnings 500"))
+        for number in range(70):
+            extras = " ".join(
+                "topic" + "".join(chr(97 + ((company * 10000 + number * 15 + j) // 26**k) % 26) for k in range(3))
+                for j in range(15)
+            )
+            pages.append((
+                document,
+                number + 2,
+                f"Subsidiary {extras}\nConsolidated Statements of Income\nAnnual net earnings vaccine healthcare medicines company holding inventory 450",
+            ))
+    result = asyncio.run(
+        search(
+            tmp_path,
+            pages,
+            "What were annual net earnings of the vaccine healthcare medicines company holding patent royalties?",
+            20,
+        )
+    )
+    assert (short, 2) in result
+
+
+def test_negative_business_description_does_not_identify_the_subject(tmp_path: Path):
+    long = "LONG_2030_10K"
+    short = "SHORT_2030_10K"
+    pages = [
+        (long, 1, "Medical company holding patent licensing payments for its vaccine research."),
+        (long, 2, "Long Corporation\nConsolidated Statements of Income\nAnnual net earnings 100"),
+        (short, 1, "Agricultural business. We are not a vaccine patent royalty holder and have no medical rights."),
+        (short, 2, "Short Corporation\nConsolidated Statements of Income\nAnnual net earnings 500"),
+    ]
+    pages += [
+        (long, i + 3, f"Annual net earnings vaccine patent medical licensing payments. Topic {i}") for i in range(70)
+    ]
+    results = asyncio.run(
+        search(tmp_path, pages, "What were the annual net earnings of the vaccine patent royalty holder?", 1)
+    )
+    assert results == [(long, 2)]
+
+
+def test_not_only_is_a_positive_business_description(tmp_path: Path):
+    pages = [
+        ("ALDER_2030_10K", 1, "We are not only a vaccine patent royalty holder but also a research company."),
+        ("ALDER_2030_10K", 2, "Alder Corporation\nConsolidated Statements of Income\nAnnual net earnings 100"),
+        ("BIRCH_2030_10K", 1, "Birch vaccine research business makes medical products."),
+        ("BIRCH_2030_10K", 2, "Birch Corporation\nConsolidated Statements of Income\nAnnual net earnings 500"),
+    ]
+    results = asyncio.run(
+        search(tmp_path, pages, "What were the annual net earnings of the vaccine patent royalty holder?", 1)
+    )
+    assert results == [("ALDER_2030_10K", 2)]
+
+
+def test_affirmative_clause_before_unrelated_negation_remains_evidence(tmp_path: Path):
+    pages = [
+        ("ALDER_2030_10K", 1, "We hold vaccine patent royalties but do not manufacture products."),
+        ("ALDER_2030_10K", 2, "Alder Corporation\nConsolidated Statements of Income\nAnnual net earnings 100"),
+        ("BIRCH_2030_10K", 1, "Birch is a vaccine research business."),
+        ("BIRCH_2030_10K", 2, "Birch Corporation\nConsolidated Statements of Income\nAnnual net earnings 500"),
+    ]
+    results = asyncio.run(
+        search(tmp_path, pages, "What were annual net earnings of the vaccine patent royalty holder?", 1)
+    )
+    assert results == [("ALDER_2030_10K", 2)]
+
+
+def test_unnamed_compound_question_keeps_both_statement_types(tmp_path: Path):
+    pages = []
+    for company in ("ALDER", "BIRCH", "CEDAR", "DAWN"):
+        document = f"{company}_2030_10K"
+        pages.extend([
+            (document, 1, f"{company} Corporation\nConsolidated Statements of Income\nNet earnings 100"),
+            (
+                document,
+                2,
+                f"{company} Corporation\nConsolidated Statements of Cash Flows\nNet cash provided by operating activities 200",
+            ),
+        ])
+        pages.extend(
+            (document, number + 3, f"{company} cash earnings activities outlook section {number}. Financial estimates.")
+            for number in range(12)
+        )
+    result = asyncio.run(
+        search(tmp_path, pages, "What were net earnings and net cash provided by operating activities?", 4)
+    )
+    assert any(number == 1 for _, number in result)
+    assert any(number == 2 for _, number in result)
