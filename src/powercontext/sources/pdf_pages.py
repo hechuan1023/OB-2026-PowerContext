@@ -830,9 +830,12 @@ def _registered_issuer(body: str) -> str | None:
     filing = re.search(r"^\s*commission\s+file\s+(?:numbers?|no\.?)\b[^\n]*\n", header, re.I | re.M)
     if filing is None:
         return None
-    lines = header[filing.end() : filing.end() + 500].splitlines()
-    for index, line in enumerate(lines):
-        name = line.strip()
+    name_block = header[filing.end() : filing.end() + 500]
+    # The filing number and legal name can each wrap across physical lines.
+    name_block = re.sub(r"\A(?:\s*[\d.-]+\s*\n)+", "", name_block)
+    lines = name_block.splitlines()
+    for index in range(len(lines)):
+        name = " ".join(" ".join(lines[: index + 1]).split())
         legal_suffix = re.search(
             r"\b(?:inc(?:orporated)?|corp(?:oration)?|company|co|plc|ltd|limited|llc|holdings|group)\.?$",
             name,
@@ -1310,9 +1313,11 @@ async def _page_candidates(
     # Once all eligible pages are available, individual term searches cannot
     # improve recall. Keep one native question ranking; expand only if needed
     # (for example when a document label contains no indexable characters).
-    queries = (question,) if eligible <= candidates.keys() else searches
+    complete_pool = eligible <= candidates.keys()
+    queries = (question,) if complete_pool else searches
+    candidate_limit = max(64, limit * 5) if complete_pool else total_entries
     for query in queries:
-        page = await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=max(64, limit * 5)))
+        page = await memory.search(SearchMemoryRequest(query=query, mode="fts", limit=candidate_limit))
         for rank, hit in enumerate(page.hits, start=1):
             identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
             if identity in eligible:

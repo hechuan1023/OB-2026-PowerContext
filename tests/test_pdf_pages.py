@@ -1155,7 +1155,10 @@ def test_pdf_quotes_preserve_source_unicode_after_restart_and_organize(tmp_path:
     ("first", "second"),
     [("record-alpha", "record-beta"), ("a", "b"), ("1", "2"), ("报告甲", "报告乙"), ("!!!", "???")],
 )
-def test_opaque_document_ids_use_registered_issuers_after_restart(tmp_path: Path, first: str, second: str) -> None:
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_opaque_document_ids_use_registered_issuers_after_restart(
+    tmp_path: Path, first: str, second: str, wrapped: bool
+) -> None:
     async def run() -> None:
         config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'opaque.db'}"))
         registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
@@ -1168,13 +1171,13 @@ def test_opaque_document_ids_use_registered_issuers_after_restart(tmp_path: Path
             "Securities registered pursuant to Section 12(g): None"
         )
         bodies = (
-            (first, cover.format(issuer="BRIAR CORPORATION", symbol="BRI")),
+            (first, cover.format(issuer="BRIAR\nCORPORATION" if wrapped else "BRIAR CORPORATION", symbol="BRI")),
             (
                 first,
                 "Software licences and related services. Transaction price is allocated between "
                 "performance obligations using standalone selling prices and market inputs.",
             ),
-            (second, cover.format(issuer="LINDEN.COM, INC.", symbol="LND")),
+            (second, cover.format(issuer="LINDEN.COM,\nINC." if wrapped else "LINDEN.COM, INC.", symbol="LND")),
             (
                 second,
                 "Our competitor is Briar. "
@@ -1183,7 +1186,9 @@ def test_opaque_document_ids_use_registered_issuers_after_restart(tmp_path: Path
             (
                 "record-gamma",
                 cover.format(
-                    issuer="BRAEMAR PARTNERS\n(Exact name of registrant as specified in its charter)", symbol="BRAE"
+                    issuer=("BRAEMAR\nPARTNERS" if wrapped else "BRAEMAR PARTNERS")
+                    + "\n(Exact name of registrant as specified in its charter)",
+                    symbol="BRAE",
                 ),
             ),
             (
@@ -1220,6 +1225,63 @@ def test_opaque_document_ids_use_registered_issuers_after_restart(tmp_path: Path
                 entry = (await memory.get(GetMemoryEntryRequest(citation=citations[0]))).entry
                 assert entry.sources[0].source_id == identities[expected], subject
                 assert citations == await search_pdf_pages(memory, question, 1)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("document", ["indexable-record", "!!!"])
+def test_document_label_searchability_does_not_truncate_evidence(tmp_path: Path, document: str) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'labels.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        cover = (
+            "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\nFORM 10-K\n"
+            "Commission File Number: 12345\nBRIAR CORPORATION\n"
+            "Securities registered pursuant to Section 12(b) of the Act:\n"
+            "Title of each class Trading Symbol Name of Exchange\n"
+            "Common Stock, par value $0.01 BRI NASDAQ\n"
+            "Securities registered pursuant to Section 12(g): None"
+        )
+        body = (
+            "Software licences and related services. Transaction price is allocated between "
+            "performance obligations using standalone selling prices and market inputs."
+        )
+        bodies = [(document, cover), (document, body)] + [
+            ("another-report", f"Disclosure {number}. {body * 30}") for number in range(120)
+        ]
+        target = None
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Indexed labels", summary="Candidate coverage", idempotency_key="labels")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, (name, text) in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id=name, document_sha256="e" * 64, page_number=number, text=text)
+                )
+                if number == 2:
+                    target = source.name
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            question = "How does Briar allocate the price of software licences and related services?"
+            citations = await search_pdf_pages(memory, question, 20)
+            source_ids = {
+                ref.source_id
+                for citation in citations
+                for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
+            }
+            assert target in source_ids
+            assert len(citations) == 2
+            assert citations == await search_pdf_pages(memory, question, 20)
 
     asyncio.run(run())
 
