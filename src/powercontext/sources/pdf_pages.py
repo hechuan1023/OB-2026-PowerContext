@@ -163,8 +163,8 @@ _CONCEPTS = (
     (frozenset({"restructuring"}), ("restructuring", "charges", "productivity")),
     (frozenset({"ebitda"}), ("operating income", "operating profit", "depreciation", "amortization", "cash flows")),
     (
-        frozenset({"capex", "expenditures", "capital", "intensive"}),
-        ("capital expenditures", "capital spending", "property plant equipment"),
+        frozenset({"capex", "expenditures", "capital", "intensive", "ppne", "ppe"}),
+        ("capital expenditures", "capital spending", "property plant and equipment"),
     ),
     (frozenset({"margin"}), ("net revenue", "net sales", "operating income")),
     (frozenset({"income", "earnings", "pnl"}), ("income", "earnings", "operations")),
@@ -210,6 +210,10 @@ _CONCEPTS = (
     (
         frozenset({"growth", "organic", "divestitures", "acquisitions", "acquisition"}),
         ("organic sales", "sales change", "divestitures", "acquisitions", "worldwide sales"),
+    ),
+    (
+        frozenset({"card", "cards", "member", "members", "retention", "retain"}),
+        ("card member", "net card fees", "card acquisitions", "retention"),
     ),
 )
 
@@ -354,10 +358,9 @@ _STATEMENT_HEADINGS = {
 def _statement_kinds(question: str) -> tuple[str, ...]:
     words = set(_WORDS.findall(question.casefold()))
     kinds: list[str] = []
-    capital = {"capital", "intensive", "solvency"}
-    if words & ({"income", "earnings", "ebitda", "profit", "pnl", "tax", "taxes", "taxation"} | capital) or re.search(
-        r"\bp\s*&\s*l\b", question.casefold()
-    ):
+    capital = {"capital", "intensive", "solvency", "ppne", "ppe"}
+    income = {"income", "earnings", "ebitda", "profit", "pnl", "tax", "taxes", "taxation", "margin", "margins", "gross"}
+    if words & (income | capital) or re.search(r"\bp\s*&\s*l\b", question.casefold()):
         kinds.append("income")
     if words & ({"cash", "cashflow", "ebitda", "capex", "depreciation", "amortization"} | capital):
         kinds.append("cash")
@@ -435,7 +438,11 @@ def _target_documents(documents: dict[str, int], question: str) -> frozenset[str
         entity_score = 6 * full_match + 3 * overlap + partial
         if entity_score:
             year_score = 2 if newest_year and newest_year in parts else int(bool(years & parts))
-            scored.append(((full_match, year_score, entity_score * (1.0 + math.log(1 + support, 2))), name))
+            # An ungrounded label is a stray first line from a split entry rather
+            # than a document the question names; trusting it would narrow the
+            # whole search to that one stray entry.
+            if full_match or year_score or support > 1:
+                scored.append(((full_match, year_score, entity_score * (1.0 + math.log(1 + support, 2))), name))
     if not scored:
         return frozenset()
     best = max(score for score, _ in scored)
@@ -505,7 +512,9 @@ def _rank_pages(
         entity_overlap = len((document_terms - {"10", "k", "annual", "report"}) & query_words)
         compact_body = " ".join(_WORDS.findall(body.casefold()))
         phrase_score = sum(1.25 for phrase in phrases if phrase in compact_body)
-        heading = " ".join(body.casefold().split())[:240]
+        # Only the opening line is the page's own title; later mentions of a
+        # statement name inside notes or discussion must not earn heading credit.
+        heading = " ".join(body.casefold().split())[:80]
         statement_score = 8.0 * sum(bool(_STATEMENT_HEADINGS[kind].search(heading)) for kind in statement_kinds)
         identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
         score = (score + phrase_score + statement_score) * (1.0 + 0.5 * entity_overlap) + 4.0 * votes.get(identity, 0.0)
