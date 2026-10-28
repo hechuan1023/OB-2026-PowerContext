@@ -248,3 +248,31 @@ def test_unnamed_compound_question_keeps_both_statement_types(tmp_path: Path):
     )
     assert any(number == 1 for _, number in result)
     assert any(number == 2 for _, number in result)
+
+
+def test_changes_in_equity_tables_cover_requested_years(tmp_path: Path):
+    doc = "RIVERTON_2030_10K"
+    pages = [
+        (
+            doc,
+            number,
+            "Riverton Corporation\nConsolidated Statements of Changes in Equity"
+            + ("\u2014(Continued)\n" if number > 1 else "\n")
+            + f"Balance as of December 31, {year - 1} 100\nNet income 20\n"
+            f"Dividends (5)\nBalance as of December 31, {year} 115",
+        )
+        for number, year in enumerate((2030, 2029, 2028), start=1)
+    ]
+    pages.extend(
+        (doc, n + 4, f"Riverton equity stockholders changes policy annual review of items {n}.") for n in range(25)
+    )
+    pages.append((doc, 29, "Riverton Corporation\nConsolidated Balance Sheets\nStockholders equity 100"))
+    result = asyncio.run(
+        search(
+            tmp_path,
+            pages,
+            "How did Riverton stockholders\u2019 equity change in 2030, 2029 and 2028 according to its consolidated statements of changes in equity?",
+            3,
+        )
+    )
+    assert set(result) == {(doc, 1), (doc, 2), (doc, 3)}

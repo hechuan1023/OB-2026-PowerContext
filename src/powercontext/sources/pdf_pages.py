@@ -723,13 +723,15 @@ _STATEMENT_QUERIES = {
     "income": ("statement of income", "statement of operations", "statement of earnings"),
     "cash": ("statement of cash flows",),
     "balance": ("balance sheet", "statement of financial position"),
-    "equity": ("statement of equity", "shareholders equity"),
+    "equity": ("statement of equity", "statement of changes in equity", "shareholders equity"),
 }
 _STATEMENT_HEADINGS = {
     "income": re.compile(r"statements?\s+of\s+(?:income|operations|earnings)|income\s+statements?"),
     "cash": re.compile(r"statements?\s+of\s+cash\s+flows?"),
     "balance": re.compile(r"balance\s+sheets?|statements?\s+of\s+financial\s+position"),
-    "equity": re.compile(r"statements?\s+of\s+(?:(?:shareholders?|stockholders?)\s+)?equity"),
+    "equity": re.compile(
+        r"statements?\s+of\s+(?:changes?\s+in\s+)?(?:(?:shareholders?|stockholders?)['\u2019]?\s+)?equity"
+    ),
 }
 _STATEMENT_ITEMS = {
     "income": (
@@ -759,7 +761,7 @@ def _statement_title_info(body: str, kind: str) -> tuple[int, tuple[str, ...]]:
         r"^(?:(?:consolidated|combined|condensed|unaudited|audited)\s+)*"
         rf"(?:{_STATEMENT_HEADINGS[kind].pattern})"
         r"(?:\s+and\s+(?:other\s+)?comprehensive\s+(?:income|loss))?"
-        r"(?:\s*\((?:continued|unaudited|audited|loss)\))*$",
+        r"(?:\s*[-\u2013\u2014]?\s*\((?:continued|unaudited|audited|loss)\))*$",
         re.MULTILINE,
     )
     # Consolidation takes precedence over completeness on a single physical
@@ -1557,6 +1559,40 @@ def _cash_statement_complements(
     return result
 
 
+def _equity_statement_complements(
+    group: list[MemoryHit], titles: dict[tuple[str, str, str], dict[str, int]], question: str
+) -> list[MemoryHit]:
+    """Keep yearly equity statements whose closing balances answer the question."""
+    requested = set(re.findall(r"\b(?:19|20)\d{2}\b", question))
+    if len(requested) < 2:
+        return []
+    by_year: dict[str, MemoryHit] = {}
+    for hit in group:
+        identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
+        if not titles[identity]["equity"]:
+            continue
+        text = " ".join(_page_text(hit).casefold().split())
+        endings = re.findall(r"\bbalance\s+(?:as\s+of|at)\s+.{0,48}?\b((?:19|20)\d{2})\b", text)
+        if endings and endings[-1] in requested:
+            by_year.setdefault(endings[-1], hit)
+    return [by_year[year] for year in sorted(by_year, reverse=True)]
+
+
+def _statement_complements(
+    kind: str,
+    group: list[MemoryHit],
+    best: MemoryHit,
+    titles: dict[tuple[str, str, str], dict[str, int]],
+    quality: int,
+    question: str,
+) -> list[MemoryHit]:
+    if kind == "cash":
+        return _cash_statement_complements(group, best, titles, quality)
+    if kind == "equity":
+        return _equity_statement_complements(group, titles, question)
+    return []
+
+
 def _statement_subject_groups(
     ranked: list[MemoryHit],
     kind: str,
@@ -1620,13 +1656,11 @@ def _statement_anchors(
                 )
                 if best not in anchors:
                     anchors.append(best)
-                if kind == "cash":
-                    # A cash-flow statement may split operating/investing and
-                    # financing activities across physical pages. The fuller
-                    # first page must not crowd out its complementary table.
-                    anchors.extend(
-                        hit for hit in _cash_statement_complements(group, best, titles, quality) if hit not in anchors
-                    )
+                anchors.extend(
+                    hit
+                    for hit in _statement_complements(kind, group, best, titles, quality, question)
+                    if hit not in anchors
+                )
                 if kind == "balance":
                     operands = {
                         phrase

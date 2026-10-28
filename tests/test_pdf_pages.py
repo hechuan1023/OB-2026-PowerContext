@@ -125,6 +125,32 @@ def test_narrow_font_spacing_keeps_words_numbers_and_rotated_text(rotated: bool)
     assert pages[1].text == ""
 
 
+def test_rotated_fragmented_word_keeps_original_word_boundaries() -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=600, height=600)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+        NameObject("/FirstChar"): NumberObject(32),
+        NameObject("/LastChar"): NumberObject(126),
+        NameObject("/Widths"): ArrayObject([NumberObject(200)] + [NumberObject(600)] * 94),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})
+    })
+    stream = DecodedStreamObject()
+    stream.set_data(
+        b"BT /F1 12 Tf 0 1 -1 0 450 10 Tm [(CONSOLID) 0 (ATED) ( STATEMENTS OF CHANG) 0 (ES IN EQUITY)] TJ ET"
+    )
+    page.replace_contents(stream.flate_encode())
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="rotated-table", content=output.getvalue()))
+    assert len(pages) == 1
+    assert pages[0].text.split() == ["CONSOLIDATED", "STATEMENTS", "OF", "CHANGES", "IN", "EQUITY"]
+
+
 @pytest.mark.parametrize(
     ("scale", "operands", "expected"),
     [

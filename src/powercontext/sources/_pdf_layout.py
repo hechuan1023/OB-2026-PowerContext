@@ -83,9 +83,17 @@ def positioned_page_text(page: PageObject) -> str:
     configuration or methods are modified.
     """
 
+    spans = _positioned_runs(page)
+    characters = sum(len(span.text) for span in spans if span.font.interpretable)
+    rotated_characters = sum(len(span.text) for span in spans if span.font.interpretable and span.rotated)
+    # The spacing calculation below assumes horizontal advances. When almost
+    # all text is rotated, its x/y gaps do not measure word spacing reliably;
+    # let the caller retain plain extraction instead.
+    if characters and rotated_characters * 5 >= characters * 4:
+        return ""
     parts: list[str] = []
     previous: TextStateParams | None = None
-    for span in _positioned_runs(page):
+    for span in spans:
         if not span.text or not span.font.interpretable:
             continue
         if previous is not None:
