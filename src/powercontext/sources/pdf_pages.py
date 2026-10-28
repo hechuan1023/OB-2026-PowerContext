@@ -240,6 +240,10 @@ _METRIC_PATTERNS = tuple((re.compile(pattern), phrases, kinds) for pattern, phra
 # natural-language questions reach notes whose wording differs from the query.
 _NOTE_CONCEPTS = (
     (
+        r"\b(?:which|what)\b.{0,100}\b(?:measures?|metrics?|indicators?)\b",
+        ("metrics",),
+    ),
+    (
         r"\b(?:borrowing (?:options|capacity)|(?:unused|undrawn) (?:credit|facilit(?:y|ies)|loans?))\b",
         ("credit facility", "commercial paper", "liquidity"),
     ),

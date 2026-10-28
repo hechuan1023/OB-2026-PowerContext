@@ -1286,6 +1286,60 @@ def test_document_label_searchability_does_not_truncate_evidence(tmp_path: Path,
     asyncio.run(run())
 
 
+def test_metric_definition_question_recalls_operating_measure(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'metrics.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        bodies = (
+            "Key operating metrics\nNet bookings tracks products and services sold to customers during a period. "
+            "It equals net revenues excluding the impact of deferrals. Net bookings in 2030 were 84 and in 2029 were 79.",
+            *(
+                f"Revenue recognition policy {n}. Revenue from product sales to customers is recognized when control "
+                "passes to customers. Each sale transaction is assessed to measure the revenue recognized. "
+                "The fair value measure is defined using the transaction price. The 2030 value is 20."
+                for n in range(25)
+            ),
+        )
+        target = None
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Operating metrics", summary="Definition evidence", idempotency_key="metrics")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, body in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id="BRIAR_2030_10K", document_sha256="f" * 64, page_number=number, text=body)
+                )
+                if number == 1:
+                    target = source.name
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            question = (
+                "Which measure does Briar use for sales as customers transacted rather than when revenue was "
+                "recognized, how does it define that measure, and what was its 2030 value?"
+            )
+            citations = await search_pdf_pages(memory, question, 1)
+            source_ids = {
+                ref.source_id
+                for citation in citations
+                for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
+            }
+            assert target in source_ids
+            assert len(citations) == 1
+            assert citations == await search_pdf_pages(memory, question, 1)
+
+    asyncio.run(run())
+
+
 def test_repeated_tables_do_not_displace_distinct_narrative_evidence(tmp_path: Path) -> None:
     async def run() -> None:
         config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'coverage.db'}"))
