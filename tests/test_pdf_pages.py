@@ -125,6 +125,44 @@ def test_narrow_font_spacing_keeps_words_numbers_and_rotated_text(rotated: bool)
     assert pages[1].text == ""
 
 
+@pytest.mark.parametrize(
+    ("scale", "operands", "expected"),
+    [
+        (0.5, b"[(Inventory) -140 (turnover)] TJ", "Inventory turnover"),
+        (2.0, b"[(inven) -80 (tories)] TJ", "inventories"),
+    ],
+)
+@pytest.mark.parametrize("text_matrix", [False, True])
+def test_scaled_text_keeps_word_boundaries(scale: float, operands: bytes, expected: str, text_matrix: bool) -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=600, height=400)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+        NameObject("/FirstChar"): NumberObject(32),
+        NameObject("/LastChar"): NumberObject(126),
+        NameObject("/Widths"): ArrayObject([NumberObject(200)] + [NumberObject(600)] * 94),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})
+    })
+    if text_matrix:
+        prefix = f"BT /F1 12 Tf {scale} 0 0 {scale} 20 100 Tm ".encode()
+        content = prefix + operands + b" ET"
+    else:
+        prefix = f"q {scale} 0 0 {scale} 0 0 cm BT /F1 12 Tf 20 100 Td ".encode()
+        content = prefix + operands + b" ET Q"
+    stream = DecodedStreamObject()
+    stream.set_data(content)
+    page.replace_contents(stream.flate_encode())
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="Scaled text", content=output.getvalue()))
+    assert len(pages) == 1
+    assert pages[0].text == expected
+
+
 def test_positioned_word_fragments_preserve_words_without_isolated_letter_runs() -> None:
     writer = PdfWriter()
     page = writer.add_blank_page(width=600, height=400)

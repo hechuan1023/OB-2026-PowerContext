@@ -91,13 +91,16 @@ def positioned_page_text(page: PageObject) -> str:
         if previous is not None:
             height = max(abs(span.font_height), abs(previous.font_height), 0.01)
             gap = round(span.tx - previous.displaced_tx, 3)
+            # Compare the space advance and gap in the same page coordinates;
+            # font-space units alone omit text and graphics matrix scaling.
+            space = span.space_tx * abs(span.transform[0])
             # Adjacent lines of a compact table can be less than one font
             # height apart. Do not flatten them into one word or header.
             if abs(span.ty - previous.ty) > height * 0.25 or span.tx < previous.tx - height * 0.5:
                 parts.append("\n")
             # Some subset fonts give the unused space glyph an enormous
             # width. A visible column gap must still separate its values.
-            elif span.space_tx > 0 and round(gap / min(span.space_tx, height)) > 0:
+            elif space > 0 and round(gap / min(space, height)) > 0:
                 parts.append(" ")
         parts.append(span.text)
         previous = span
