@@ -276,3 +276,55 @@ def test_changes_in_equity_tables_cover_requested_years(tmp_path: Path):
         )
     )
     assert set(result) == {(doc, 1), (doc, 2), (doc, 3)}
+
+
+def test_prepaid_balance_question_recalls_policy_and_movements(tmp_path: Path):
+    doc = "HARBOR_2030_10K"
+    pages = [
+        (doc, 1, "Stored Value Cards\nBreakage revenue arises from unredeemed stored value cards at licensed stores."),
+        (
+            doc,
+            2,
+            "Deferred Revenue\nStored value cards and loyalty program\n"
+            "Balance beginning 100\nCard activations and reloads 400\nRedemptions 350\nBalance ending 150",
+        ),
+    ]
+    pages.extend(
+        (doc, n + 3, f"Harbor income and customer balances. Cash loaded and unused balances review {n}.")
+        for n in range(25)
+    )
+    result = asyncio.run(
+        search(
+            tmp_path,
+            pages,
+            "What income arose from Harbor prepaid balances, and how did unused customer balances change?",
+            2,
+        )
+    )
+    assert set(result) == {(doc, 1), (doc, 2)}
+
+
+def test_research_asset_purchase_paraphrase_recalls_accounting_note(tmp_path: Path):
+    doc = "HARBOR_2030_10K"
+    pages = [
+        (
+            doc,
+            1,
+            "Asset Acquisitions\nAcquired in-process research and development in an asset acquisition "
+            "is expensed as research and development expense. Milestone payments before regulatory "
+            "approval are expensed as research and development expense.",
+        ),
+    ]
+    pages.extend(
+        (doc, n + 2, f"Harbor drug research assets operating business purchase account strategy review {n}.")
+        for n in range(25)
+    )
+    result = asyncio.run(
+        search(
+            tmp_path,
+            pages,
+            "How does Harbor account for drug research it buys as assets rather than an operating business?",
+            1,
+        )
+    )
+    assert result == [(doc, 1)]

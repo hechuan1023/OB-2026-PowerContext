@@ -278,7 +278,7 @@ _NOTE_CONCEPTS = (
         ("shipping and handling", "distribution costs", "selling marketing and administrative"),
     ),
     (
-        r"\b(?:research and development|r\s*&\s*d|software development)\b|"
+        r"\b(?:research|r\s*&\s*d|software development)\b|"
         r"\b(?:creat\w*|design\w*)\b.{0,60}\b(?:new technology|software|new products?)\b",
         ("research and development", "development costs", "expensed as incurred", "capitalized"),
     ),
@@ -299,6 +299,12 @@ _NOTE_CONCEPTS = (
         r"\b(?:unearned|deferred revenue|contract liabilities|remaining performance obligations)\b|"
         r"\b(?:contracts?|deals?)\b(?=.{0,100}\b(?:not|yet)\b.{0,30}\bearned\b)",
         ("unearned revenue", "deferred revenue", "remaining performance obligations", "contract liabilities"),
+    ),
+    (
+        r"\b(?:stored value|gift cards?|prepaid (?:cards?|balances?)|unredeemed|breakage|loyalty (?:rewards?|points?))\b|"
+        r"\b(?:unused|unspent)\s+(?:customer\s+)?balances?\b|"
+        r"\b(?:cash|money)\s+(?:loaded|reloaded)\b",
+        ("stored value cards", "deferred revenue", "redemptions", "breakage", "loyalty program"),
     ),
     (
         r"\b(?:standalone|stand alone|separate) selling price\b|"
