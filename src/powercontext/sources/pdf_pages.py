@@ -1001,19 +1001,20 @@ def _declared_issuer_names(body: str, issuer: str) -> set[str]:
     return names
 
 
-def _document_issuer_names(pages: list[tuple[str, str]]) -> dict[str, frozenset[str]]:
+def _document_issuer_groups(pages: list[tuple[str, str]]) -> dict[str, tuple[frozenset[str], ...]]:
     bodies: dict[str, list[str]] = {}
     registered: dict[str, dict[tuple[str, ...], str]] = {}
     for document, body in pages:
         bodies.setdefault(document, []).append(body)
         for issuer in _registered_issuers(body):
             registered.setdefault(document, {})[_legal_issuer_words(issuer)] = issuer
-    result: dict[str, frozenset[str]] = {}
+    result: dict[str, tuple[frozenset[str], ...]] = {}
     for document, issuers in registered.items():
         # Co-registrants are all subjects of the same filing. Retain each one
         # so an explicit comparison cannot silently exclude the joint report.
-        names: set[str] = set()
-        for issuer in issuers.values():
+        groups: list[frozenset[str]] = []
+        for issuer in sorted(issuers.values()):
+            names: set[str] = set()
             names.add(_company_name(re.sub(r"\.(?:com|net|org)\b", "", issuer, flags=re.I)))
             # Preserve a complete registered brand word whose initialism and
             # lowercase suffix distinguish it from an ordinary leading word.
@@ -1031,7 +1032,8 @@ def _document_issuer_names(pages: list[tuple[str, str]]) -> dict[str, frozenset[
                     names.add(canonical)
             for body in bodies[document]:
                 names.update(_declared_issuer_names(body, issuer))
-        result[document] = frozenset(names)
+            groups.append(frozenset(names))
+        result[document] = tuple(groups)
     return result
 
 
@@ -1134,7 +1136,10 @@ async def _pdf_inventory(
         inventory,
         len(stored.entries),
         {doc: next(iter(values)) for doc, values in symbols.items() if len(values) == 1},
-        _document_issuer_names(pages),
+        {
+            document: frozenset(name for group in groups for name in group)
+            for document, groups in _document_issuer_groups(pages).items()
+        },
     )
 
 
@@ -1332,11 +1337,44 @@ def _cash_statement_complements(
     return result
 
 
+def _statement_subject_groups(
+    ranked: list[MemoryHit],
+    kind: str,
+    targets: frozenset[str],
+    issuers: dict[str, tuple[frozenset[str], ...]],
+    subjects: dict[tuple[str, str, str], dict[str, frozenset[str]]],
+) -> list[list[MemoryHit]]:
+    if not targets:
+        return [ranked]
+    result = []
+    for document in sorted(targets):
+        hits = [hit for hit in ranked if _document_name(hit) == document]
+        families = issuers.get(document, ())
+        if len(families) < 2:
+            result.append(hits)
+            continue
+        # A joint report can supply separate statements for each requested
+        # registrant. Keep their reservations separate; unlabelled continuation
+        # pages remain eligible for completing a split statement.
+        for family in families:
+            group = []
+            for hit in hits:
+                owner = subjects[(hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)].get(
+                    kind, frozenset()
+                )
+                if not owner or owner & family:
+                    group.append(hit)
+            result.append(group)
+    return result
+
+
 def _statement_anchors(
     ranked: list[MemoryHit],
     titles: dict[tuple[str, str, str], dict[str, int]],
     question: str,
     targets: frozenset[str],
+    issuers: dict[str, tuple[frozenset[str], ...]],
+    subjects: dict[tuple[str, str, str], dict[str, frozenset[str]]],
 ) -> list[MemoryHit]:
     statement_kinds = _primary_statement_kinds(question)
     anchors: list[MemoryHit] = []
@@ -1344,9 +1382,8 @@ def _statement_anchors(
     # must not consume the whole result budget and crowd out another statement.
     # Only explicit comparison subjects get separate reservations. A question
     # without a named subject must not fill its budget with every stored report.
-    groups = [[hit for hit in ranked if _document_name(hit) == doc] for doc in sorted(targets)] if targets else [ranked]
     for kind in statement_kinds:
-        for group in groups:
+        for group in _statement_subject_groups(ranked, kind, targets, issuers, subjects):
             if not group:
                 continue
             quality = max(
@@ -1406,12 +1443,16 @@ def _rank_pages(
     # its name in BM25 can favor covers and boilerplate over a lease/segment note.
     query_tokens = re.findall(r"[a-z0-9]+", _normalize_question(question))
     companies = {_company_name(document) for document in targets}
-    company_names = _document_issuer_names([
+    issuer_groups = _document_issuer_groups([
         (_document_name(hit), hit.text.partition("\n")[2]) for hit in hits if _document_name(hit) in targets
     ])
-    requested_issuers = {
-        document: _mentioned_issuer_names(question, names) for document, names in company_names.items()
+    company_names = {
+        document: frozenset(name for group in groups for name in group) for document, groups in issuer_groups.items()
     }
+    requested_issuers = {}
+    for document, groups in issuer_groups.items():
+        mentioned = _mentioned_issuer_names(question, company_names[document])
+        requested_issuers[document] = tuple(group for group in groups if group & mentioned)
     companies.update(name for names in company_names.values() for name in names)
     subject_terms = {
         _stem(word)
@@ -1431,6 +1472,7 @@ def _rank_pages(
     statement_kinds = _primary_statement_kinds(question)
     scores = []
     titles: dict[tuple[str, str, str], dict[str, int]] = {}
+    subjects: dict[tuple[str, str, str], dict[str, frozenset[str]]] = {}
     for hit, counts, words, search_body in zip(hits, terms, tokens, search_bodies, strict=True):
         page_score = _lexical_score(counts, weights, idf, average_length)
         # Overlapping passages keep nearby sentences/table rows together while
@@ -1452,14 +1494,21 @@ def _rank_pages(
         phrase_score = sum(0.8 for phrase in phrases if phrase in compact_body)
         identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
         titles[identity] = {kind: _statement_title_quality(body, kind) for kind in statement_kinds}
+        subjects[identity] = {}
         for kind, quality in titles[identity].items():
             heading = _STATEMENT_HEADINGS[kind].search(body.casefold())
             subject = "\n".join(body[: heading.start()].splitlines()[-4:]) if heading else ""
-            requested = requested_issuers.get(document, frozenset())
+            requested = requested_issuers.get(document, ())
+            # A short name and a full heading can belong to the same issuer.
+            # Compare their alias families without merging co-registrants.
+            subject_names = (
+                _mentioned_issuer_names(subject, company_names[document]) if requested and quality else frozenset()
+            )
+            subjects[identity][kind] = subject_names
             subject_matches = (
-                requested & _mentioned_issuer_names(subject, company_names[document])
+                any(group & subject_names for group in requested)
                 if requested
-                else _target_documents(frozenset({document}), subject)
+                else bool(_target_documents(frozenset({document}), subject))
             )
             if quality and subject_matches:
                 # Distinguish a parent's statement from its subsidiary's statement
@@ -1470,7 +1519,7 @@ def _rank_pages(
         score = (score + phrase_score) * (1.0 + 0.5 * entity_overlap) + 4.0 * votes.get(identity, 0.0)
         scores.append((score, hit))
     scores.sort(key=lambda item: (-item[0], item[1].memory_ref.artifact_id, item[1].entry_id))
-    anchors = _statement_anchors([hit for _, hit in scores], titles, question, targets)
+    anchors = _statement_anchors([hit for _, hit in scores], titles, question, targets, requested_issuers, subjects)
     return _diverse_pages(scores, anchors, limit, question)
 
 
