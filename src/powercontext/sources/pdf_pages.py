@@ -162,13 +162,55 @@ _CONCEPTS = (
     ),
     (frozenset({"restructuring"}), ("restructuring", "charges", "productivity")),
     (frozenset({"ebitda"}), ("operating income", "operating profit", "depreciation", "amortization", "cash flows")),
-    (frozenset({"capex", "expenditures"}), ("capital expenditures", "capital spending", "property plant equipment")),
+    (
+        frozenset({"capex", "expenditures", "capital", "intensive"}),
+        ("capital expenditures", "capital spending", "property plant equipment"),
+    ),
     (frozenset({"margin"}), ("net revenue", "net sales", "operating income")),
     (frozenset({"income", "earnings", "pnl"}), ("income", "earnings", "operations")),
     (frozenset({"cash", "cashflow"}), ("cash flows", "operating activities", "investing activities")),
     (frozenset({"revenue", "revenues", "sales"}), ("revenue", "revenues", "sales")),
     (frozenset({"debt", "borrowings"}), ("debt", "borrowings", "maturities", "obligations")),
     (frozenset({"dividend", "dividends"}), ("dividends", "shareholders", "distributions")),
+    (
+        frozenset({"liquidity", "liquid", "solvency", "quick"}),
+        ("liquidity", "current assets", "balance sheet", "cash and cash equivalents", "accounts receivable"),
+    ),
+    (
+        frozenset({"cyclicality", "cyclical", "cyclic", "seasonality", "seasonal"}),
+        ("cyclical", "cyclicality", "profit swings", "airline industry"),
+    ),
+    (
+        frozenset({"categories", "category", "segments", "segment"}),
+        ("business segment", "reportable segments", "segment data", "worldwide sales", "sales change"),
+    ),
+    (
+        frozenset({"tax", "taxes", "taxation"}),
+        (
+            "income tax expense",
+            "effective tax rate",
+            "provision for income taxes",
+            "income before income taxes",
+            "tax rate",
+        ),
+    ),
+    (
+        frozenset({"customers", "customer", "concentration", "concentrated"}),
+        (
+            "major customers",
+            "customer concentration",
+            "one customer",
+            "accounted for",
+            "significant portion",
+            "substantial portion",
+            "limited number",
+            "material adverse effect",
+        ),
+    ),
+    (
+        frozenset({"growth", "organic", "divestitures", "acquisitions", "acquisition"}),
+        ("organic sales", "sales change", "divestitures", "acquisitions", "worldwide sales"),
+    ),
 )
 
 
@@ -312,11 +354,16 @@ _STATEMENT_HEADINGS = {
 def _statement_kinds(question: str) -> tuple[str, ...]:
     words = set(_WORDS.findall(question.casefold()))
     kinds: list[str] = []
-    if words & {"income", "earnings", "ebitda", "profit", "pnl"} or re.search(r"\bp\s*&\s*l\b", question.casefold()):
+    capital = {"capital", "intensive", "solvency"}
+    if words & ({"income", "earnings", "ebitda", "profit", "pnl", "tax", "taxes", "taxation"} | capital) or re.search(
+        r"\bp\s*&\s*l\b", question.casefold()
+    ):
         kinds.append("income")
-    if words & {"cash", "cashflow", "ebitda", "capex", "depreciation", "amortization"}:
+    if words & ({"cash", "cashflow", "ebitda", "capex", "depreciation", "amortization"} | capital):
         kinds.append("cash")
-    if words & {"balance", "assets", "liabilities", "receivables", "inventory"}:
+    if words & (
+        {"balance", "assets", "liabilities", "receivables", "inventory", "liquidity", "quick", "ratio"} | capital
+    ):
         kinds.append("balance")
     if words & {"equity", "stockholders", "shareholders"}:
         kinds.append("equity")
@@ -354,16 +401,22 @@ def _document_name(hit: MemoryHit) -> str:
     return hit.text.partition("\n")[0].strip()
 
 
-def _target_documents(documents: frozenset[str], question: str) -> frozenset[str]:
-    """Resolve explicit company/year mentions against document labels from Memory."""
+def _target_documents(documents: dict[str, int], question: str) -> frozenset[str]:
+    """Resolve explicit company/year mentions against document labels from Memory.
+
+    A label's entry count is its support. A pipeline that splits one oversize page
+    into several entries leaves later chunks without the label line, so a stray
+    first line can name a phantom document backed by a single entry; full-name
+    matches, year matches and entry support all keep those strays out of the way.
+    """
 
     query_tokens = set(_WORDS.findall(question.casefold()))
     alphanumeric_tokens = set(re.findall(r"[a-z0-9]+", question.casefold()))
     compact_query = "".join(re.findall(r"[a-z0-9]+", question.casefold()))
     years = set(re.findall(r"\b(?:19|20)\d{2}\b", re.sub(r"\bfy(?=\d)", "", question.casefold())))
     newest_year = max(years, default="")
-    scored: list[tuple[tuple[int, int], str]] = []
-    for name in documents:
+    scored: list[tuple[tuple[bool, int, float], str]] = []
+    for name, support in documents.items():
         parts = set(_WORDS.findall(name.casefold()))
         company_parts = [
             part
@@ -382,7 +435,7 @@ def _target_documents(documents: frozenset[str], question: str) -> frozenset[str
         entity_score = 6 * full_match + 3 * overlap + partial
         if entity_score:
             year_score = 2 if newest_year and newest_year in parts else int(bool(years & parts))
-            scored.append(((entity_score, year_score), name))
+            scored.append(((full_match, year_score, entity_score * (1.0 + math.log(1 + support, 2))), name))
     if not scored:
         return frozenset()
     best = max(score for score, _ in scored)
@@ -410,15 +463,16 @@ async def _recall_documents(memory: Any, documents: frozenset[str], limit: int) 
     return hits
 
 
-async def _available_documents(memory: Any) -> frozenset[str]:
+async def _available_documents(memory: Any) -> dict[str, int]:
     # Listing discovers current document labels; it does not manufacture hits.
-    # All candidate citations below still come from Memory.search.
+    # All candidate citations below still come from Memory.search. Counts are the
+    # support behind each label and separate document pools from split-page strays.
+    counts: Counter[str] = Counter()
     stored = await memory.list()
-    return frozenset(
-        row.entry.text.partition("\n")[0].strip()
-        for row in stored.entries
-        if any(ref.source_type == "pdf-page" for ref in row.entry.sources)
-    )
+    for row in stored.entries:
+        if any(ref.source_type == "pdf-page" for ref in row.entry.sources):
+            counts[row.entry.text.partition("\n")[0].strip()] += 1
+    return dict(counts)
 
 
 def _rank_pages(
@@ -450,7 +504,7 @@ def _rank_pages(
         # the body determines the evidence page within it.
         entity_overlap = len((document_terms - {"10", "k", "annual", "report"}) & query_words)
         compact_body = " ".join(_WORDS.findall(body.casefold()))
-        phrase_score = sum(0.8 for phrase in phrases if phrase in compact_body)
+        phrase_score = sum(1.25 for phrase in phrases if phrase in compact_body)
         heading = " ".join(body.casefold().split())[:240]
         statement_score = 8.0 * sum(bool(_STATEMENT_HEADINGS[kind].search(heading)) for kind in statement_kinds)
         identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
@@ -480,7 +534,7 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
             identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
             candidates[identity] = hit
             votes[identity] = votes.get(identity, 0.0) + 1.0 / (60 + rank)
-    selected_documents = targets or documents
+    selected_documents = targets or frozenset(documents)
     for hit in await _recall_documents(memory, selected_documents, limit):
         identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
         candidates[identity] = hit
