@@ -723,7 +723,7 @@ _STATEMENT_ITEMS = {
 }
 
 
-def _statement_title_quality(body: str, kind: str) -> int:
+def _statement_title_info(body: str, kind: str) -> tuple[int, tuple[str, ...]]:
     """Identify actual table titles, including wrapped titles, rather than prose mentions.
 
     Annual reports can include numerous subsidiary statements and contents entries.
@@ -741,13 +741,40 @@ def _statement_title_quality(body: str, kind: str) -> int:
     # Consolidation takes precedence over completeness on a single physical
     # page: a split consolidated balance sheet must outrank a condensed parent-
     # only schedule even when the latter contains all three defining line items.
-    quality = max((8 if "consolidated" in match[0].split() else 2 for match in title.finditer(normalized)), default=0)
+    matches = tuple(title.finditer(normalized))
+    base = max((8 if "consolidated" in match[0].split() else 2 for match in matches), default=0)
+    contexts = tuple(
+        "\n".join(normalized[: match.start()].splitlines()[-4:])
+        for match in matches
+        if (8 if "consolidated" in match[0].split() else 2) == base
+    )
+    quality = base
     if quality:
         # A column label in a footnote can itself say "Consolidated Balance
         # Sheet". The main statement also contains its defining line items.
         terms = " ".join(_WORDS.findall(normalized))
         quality += sum(bool(re.search(pattern, terms)) for pattern in _STATEMENT_ITEMS[kind])
-    return quality
+    return quality, contexts
+
+
+def _statement_owner_names(context: str, names: frozenset[str]) -> frozenset[str]:
+    """Use the nearest company-name block, excluding narrative cross-references."""
+
+    lines = context.splitlines()
+    for start in range(len(lines) - 1, -1, -1):
+        candidate = " ".join(lines[start:]).strip()
+        candidate = re.sub(r"\s*\((?:continued|unaudited|audited)\)\s*$", "", candidate, flags=re.I)
+        candidate = re.sub(
+            r"\s+(?:and|together with)(?:\s+(?:its|all|the|consolidated))*"
+            r"\s+(?:subsidiaries|subsidiary companies)\s*$",
+            "",
+            candidate,
+            flags=re.I,
+        )
+        canonical = _company_name(_normalize_question(candidate))
+        if canonical and canonical in names:
+            return frozenset({canonical})
+    return frozenset()
 
 
 def _statement_kinds(question: str) -> tuple[str, ...]:
@@ -1493,22 +1520,23 @@ def _rank_pages(
         compact_body = " ".join(_WORDS.findall(search_body))
         phrase_score = sum(0.8 for phrase in phrases if phrase in compact_body)
         identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
-        titles[identity] = {kind: _statement_title_quality(body, kind) for kind in statement_kinds}
+        titles[identity] = {}
         subjects[identity] = {}
-        for kind, quality in titles[identity].items():
-            heading = _STATEMENT_HEADINGS[kind].search(body.casefold())
-            subject = "\n".join(body[: heading.start()].splitlines()[-4:]) if heading else ""
-            requested = requested_issuers.get(document, ())
+        known_names = company_names.get(document, frozenset({_company_name(document)}))
+        requested = requested_issuers.get(document, ())
+        for kind in statement_kinds:
+            quality, contexts = _statement_title_info(body, kind)
+            titles[identity][kind] = quality
             # A short name and a full heading can belong to the same issuer.
             # Compare their alias families without merging co-registrants.
-            subject_names = (
-                _mentioned_issuer_names(subject, company_names[document]) if requested and quality else frozenset()
+            subject_names = frozenset(
+                name for context in contexts for name in _statement_owner_names(context, known_names)
             )
             subjects[identity][kind] = subject_names
             subject_matches = (
                 any(group & subject_names for group in requested)
                 if requested
-                else bool(_target_documents(frozenset({document}), subject))
+                else any(_target_documents(frozenset({document}), context) for context in contexts)
             )
             if quality and subject_matches:
                 # Distinguish a parent's statement from its subsidiary's statement

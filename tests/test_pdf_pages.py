@@ -1424,6 +1424,7 @@ def test_report_defined_company_names_preserve_both_comparison_subjects(tmp_path
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("cross_reference", [False, True], ids=["plain", "with_cross_reference"])
 @pytest.mark.parametrize("wrapped_rows", [False, True])
 @pytest.mark.parametrize("subsidiary", ["Larch Electric Company", "Aster Electric Company"])
 @pytest.mark.parametrize(
@@ -1435,7 +1436,7 @@ def test_report_defined_company_names_preserve_both_comparison_subjects(tmp_path
     ],
 )
 def test_joint_filing_registrants_remain_comparison_candidates(
-    tmp_path: Path, wrapped_rows: bool, subsidiary: str, parent: str, short_name: str
+    tmp_path: Path, wrapped_rows: bool, subsidiary: str, parent: str, short_name: str, cross_reference: bool
 ) -> None:
     async def run() -> None:
         config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'joint.db'}"))
@@ -1448,6 +1449,7 @@ def test_joint_filing_registrants_remain_comparison_candidates(
                 ("1-98765", subsidiary.upper(), "New York", "98-7654321"),
             )
         )
+        preface = f"{subsidiary}: see the balance sheets in the following section.\n" if cross_reference else ""
         bodies = (
             (
                 "external-alpha",
@@ -1461,12 +1463,12 @@ def test_joint_filing_registrants_remain_comparison_candidates(
             ),
             (
                 "external-alpha",
-                f"{parent}\nConsolidated Balance Sheets\n"
+                preface + f"{parent}\nConsolidated Balance Sheets\n"
                 "2030 Current assets 500. Total assets 1000. 2029 Current assets 480. Total assets 950.",
             ),
             (
                 "external-alpha",
-                f"{parent}\nConsolidated Balance Sheets\n"
+                preface + f"{parent}\nConsolidated Balance Sheets\n"
                 "2030 Current liabilities 250. Total liabilities 600. 2029 Current liabilities 260. Total liabilities 580.",
             ),
             (
@@ -2025,15 +2027,104 @@ def test_financing_and_pension_paraphrases_recall_exact_pages_after_restart(tmp_
     asyncio.run(run())
 
 
-def test_calculation_and_split_cash_flow_evidence_survive_top_twenty(tmp_path: Path) -> None:
+def test_distinct_cash_totals_on_similar_continuations_are_both_retrieved(tmp_path: Path) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'cash-totals.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        cover = (
+            "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\nFORM 10-K\n"
+            "Commission File Number: 1-12345\n{issuer} CORPORATION\n"
+            "(Exact name of registrant as specified in its charter)\n"
+            "Securities registered pursuant to Section 12(b) of the Act:\n"
+            "Title of each class Trading Symbol Name of Exchange\nCommon Stock NV NASDAQ\n"
+            "Securities registered pursuant to Section 12(g): None"
+        )
+        main = (
+            "{issuer} Corporation\nConsolidated Statements of Cash Flows\n"
+            "Operating activities\nNet cash provided by operating activities 100\n"
+            "Investing activities\nNet cash used in investing activities 80\nFinancing activities\n"
+            "Borrowings under credit facilities 20"
+        )
+        continuation = (
+            "Proceeds from issuance of long-term debt {borrowed}\nRepayment of long-term debt 30\n"
+            "Net cash provided by financing activities {financing}\n"
+            "Net change in cash and cash equivalents {change}\n"
+            "Cash and cash equivalents at end of period {balance}"
+        )
+        bodies = [
+            cover.format(issuer="NIVERTON"),
+            main.format(issuer="Niverton"),
+            continuation.format(borrowed=50, financing=40, change=60, balance=70),
+            cover.format(issuer="HARBOR"),
+            main.format(issuer="Harbor"),
+            continuation.format(borrowed=60, financing=50, change=70, balance=80),
+        ]
+        topics = (
+            "customer collections receivables credit insurance inventory suppliers working capital",
+            "property equipment acquisitions intangible assets licenses construction commitments leases",
+            "pension retirement employee compensation benefits expenses actuarial contribution obligations",
+            "foreign currencies exchange rates inflation hedging derivatives swaps pricing volatility",
+            "research technology development software platforms products innovation materials design",
+        )
+        bodies.extend(
+            f"Funding review {number}. Management discusses net cash from financing activities and changes in cash. "
+            + topics[number % len(topics)]
+            + f" Additional analysis includes {topics[(number + 1) % len(topics)]}."
+            for number in range(30)
+        )
+        expected = set()
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Cash totals", summary="Distinct financial tables", idempotency_key="cash-totals")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, body in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id="opaque-report", document_sha256="b" * 64, page_number=number, text=body)
+                )
+                if number in {3, 6}:
+                    expected.add(source.name)
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            question = (
+                "Compare the net cash from financing activities and the net change in cash reported by "
+                "Niverton and Harbor in their 2030 consolidated cash flow statements."
+            )
+            citations = await search_pdf_pages(memory, question, 20)
+            found = {
+                ref.source_id
+                for citation in citations
+                for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
+            }
+            assert len(citations) == len(found) == 20 and expected <= found
+            assert citations == await search_pdf_pages(memory, question, 20)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("header_on_previous_page", [False, True])
+def test_calculation_and_split_cash_flow_evidence_survive_top_twenty(
+    tmp_path: Path, header_on_previous_page: bool
+) -> None:
     async def run() -> None:
         config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'coverage.db'}"))
         registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
         bodies = [
             "Consolidated Statement of Income\n2031 2030\nNet sales 600 500\nOperating profit 90 80\nNet income 50 40",
             "Consolidated Statement of Cash Flows\nOperating activities\nNet income 50\n"
-            "Investing activities\nPurchases of property and equipment 20",
-            "Consolidated Statement of Cash Flows (continued)\nFinancing activities\n"
+            "Investing activities\nPurchases of property and equipment 20"
+            + ("\nFinancing activities" if header_on_previous_page else ""),
+            ("" if header_on_previous_page else "Consolidated Statement of Cash Flows (continued)\n")
+            + "Net cash provided by financing activities 3\n"
             "Cash dividends paid 15\nDebt repayments 10\nProceeds from borrowings 8",
             "Consolidated Balance Sheets\nTotal assets 900\nTotal liabilities 400\nStockholders equity 500",
         ]
