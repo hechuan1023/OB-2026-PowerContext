@@ -113,6 +113,53 @@ def test_password_required_document_is_rejected() -> None:
         parse_pdf_document(PDFDocumentInput(document_id="encrypted", content=_document("secret")))
 
 
+def test_spec_legal_variants_parse_completely() -> None:
+    content = _document()
+    expected = [(1, "Revenue 1,234.50 and operating income 42."), (2, ""), (3, "Cash flows 987 and depreciation 10.")]
+    # ISO 32000 places the header within the first 1024 bytes: a leading preamble
+    # still identifies a PDF, and readers tolerate trailing bytes after %%EOF.
+    for variant in (b"\x00junk preamble" * 10 + content, content + b"\ntrailing bytes after eof" * 5):
+        pages = parse_pdf_document(PDFDocumentInput(document_id="variant", content=variant))
+        assert [(page.page_number, page.text.strip()) for page in pages] == expected
+        assert {page.document_sha256 for page in pages} == {sha256(variant).hexdigest()}
+
+
+def test_incremental_update_revision_keeps_old_identity_reachable() -> None:
+    original = _document()
+    writer = PdfWriter()
+    writer.append(io.BytesIO(original))
+    writer.add_metadata({"/Title": "New revision"})
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    updated = buffer.getvalue()
+    first = parse_pdf_document(PDFDocumentInput(document_id="doc", content=original))
+    second = parse_pdf_document(PDFDocumentInput(document_id="doc", content=updated))
+    assert [page.page_number for page in second] == [1, 2, 3]
+    assert first[0].document_sha256 != second[0].document_sha256
+    registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+    first_source = asyncio.run(registry.resolve(first[0]))
+    second_source = asyncio.run(registry.resolve(second[0]))
+    assert first_source.name != second_source.name
+    assert asyncio.run(registry.read(first_source)) == first[0]
+
+
+def test_empty_password_aes_permissions_are_readable() -> None:
+    writer = PdfWriter()
+    writer.append(io.BytesIO(_document()))
+    writer.encrypt(user_password="", owner_password="owner", algorithm="AES-256")  # noqa: S106 - constructed test document
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="aes", content=buffer.getvalue()))
+    assert [page.page_number for page in pages] == [1, 2, 3]
+
+
+@pytest.mark.parametrize("fraction", [0.2, 0.5, 0.75, 0.9])
+def test_truncated_documents_fail_atomically(fraction: float) -> None:
+    content = _document()
+    with pytest.raises(ValueError):
+        parse_pdf_document(PDFDocumentInput(document_id="truncated", content=content[: int(len(content) * fraction)]))
+
+
 @pytest.mark.parametrize("document_id", ["", "  ", "\t\n", "　"])
 def test_blank_document_id_is_rejected(document_id: str) -> None:
     with pytest.raises(ValueError):

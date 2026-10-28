@@ -247,11 +247,14 @@ class PDFPageInput(BaseModel):
 def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
     """Extract every page, returning nothing until the complete input succeeds."""
 
-    if not value.content.startswith(b"%PDF-"):
+    # ISO 32000 places the %PDF- header within the first 1024 bytes, so a leading
+    # preamble still identifies a PDF document; anything without the header is not
+    # a PDF at all.
+    if b"%PDF-" not in value.content[:1024]:
         raise ValueError("content must be a complete PDF document")  # noqa: TRY003
     digest = sha256(value.content).hexdigest()
     try:
-        reader = PdfReader(io.BytesIO(value.content), strict=True)
+        reader = PdfReader(io.BytesIO(value.content))
         if reader.is_encrypted and not reader.decrypt(""):
             raise ValueError("PDF requires a non-empty password")  # noqa: TRY003, TRY301
         pages = []
@@ -416,7 +419,10 @@ def _target_documents(documents: dict[str, int], question: str) -> frozenset[str
     query_tokens = set(_WORDS.findall(question.casefold()))
     alphanumeric_tokens = set(re.findall(r"[a-z0-9]+", question.casefold()))
     compact_query = "".join(re.findall(r"[a-z0-9]+", question.casefold()))
+    # FY22 and FY2022 name the same fiscal year; without this the two-digit
+    # shorthand cannot disambiguate same-company documents across years.
     years = set(re.findall(r"\b(?:19|20)\d{2}\b", re.sub(r"\bfy(?=\d)", "", question.casefold())))
+    years.update(f"20{shorthand}" for shorthand in re.findall(r"\bfy\s*(\d{2})\b", question.casefold()))
     newest_year = max(years, default="")
     scored: list[tuple[tuple[bool, int, float], str]] = []
     for name, support in documents.items():
