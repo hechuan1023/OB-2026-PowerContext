@@ -244,6 +244,21 @@ _METRIC_PATTERNS = tuple((re.compile(pattern), phrases, kinds) for pattern, phra
 # natural-language questions reach notes whose wording differs from the query.
 _NOTE_CONCEPTS = (
     (
+        r"\b(?:product warrant(?:y|ies)|warranty liabilities)\b|"
+        r"\b(?:repair\w*|replac\w*)\b.{0,70}\b(?:faulty|defective|defects?)\b",
+        ("product warranties", "warranty liabilities", "warranty claims"),
+    ),
+    (
+        r"\b(?:shipping|handling|freight|delivery costs?)\b|"
+        r"\b(?:getting|deliver\w*|transport\w*)\b.{0,50}\b(?:goods|products?)\b.{0,50}\b(?:customers?|buyers?)\b",
+        ("shipping and handling", "distribution costs", "selling marketing and administrative"),
+    ),
+    (
+        r"\b(?:research and development|r\s*&\s*d|software development)\b|"
+        r"\b(?:creat\w*|design\w*)\b.{0,60}\b(?:new technology|software|new products?)\b",
+        ("research and development", "development costs", "expensed as incurred", "capitalized"),
+    ),
+    (
         r"\b(?:which|what)\b.{0,100}\b(?:measures?|metrics?|indicators?)\b",
         ("metrics",),
     ),
@@ -823,6 +838,30 @@ def _company_name(document: str) -> str:
     )
 
 
+def _exact_name_issuers(header: str) -> set[str]:
+    """Read the name field when cover columns interleave the filing label."""
+
+    names: set[str] = set()
+    for label in re.finditer(r"^\s*\(?exact\s+name\s+of\s+registrant\b", header, re.I | re.M):
+        parts: list[str] = []
+        for line in reversed(header[: label.start()].splitlines()[-6:]):
+            line = line.strip()
+            if not line:
+                continue
+            if (
+                not re.fullmatch(r"[\w &.,'\u2019-]{2,160}", line)
+                or not re.search(r"[a-z]", line, re.I)
+                or re.search(r"(?<![\w-])\d{1,6}-\d{1,8}(?![\w-])", line)
+                or re.search(r"\b(?:commission\s+file|fiscal\s+year|form\s+\d)", line, re.I)
+            ):
+                break
+            parts.insert(0, line)
+        name = " ".join(parts)
+        if len(name) <= 160 and _company_name(name):
+            names.add(name)
+    return names
+
+
 def _registered_issuers(body: str) -> tuple[str, ...]:
     """Read the filing's own issuers, independently of its caller-assigned ID.
 
@@ -836,10 +875,8 @@ def _registered_issuers(body: str) -> tuple[str, ...]:
         return ()
     header = body[: securities.start()]
     filing = re.search(r"^\s*commission\s+file\s+(?:numbers?|no\.?)\b[^\n]*\n", header, re.I | re.M)
-    if filing is None:
-        return ()
     names: set[str] = set()
-    name_block = header[filing.end() : filing.end() + 500]
+    name_block = header[filing.end() : filing.end() + 500] if filing else ""
     # The filing number and legal name can each wrap across physical lines.
     name_block = re.sub(r"\A(?:\s*[\d.-]+\s*\n)+", "", name_block)
     lines = name_block.splitlines()
@@ -857,7 +894,7 @@ def _registered_issuers(body: str) -> tuple[str, ...]:
             break
     # Joint filings can place all registrants in a table: file number, legal
     # name, state and employer ID. Extraction may retain rows or wrap cells.
-    table = header[filing.end() :]
+    table = header[filing.end() :] if filing else ""
     if re.search(r"\bexact\s+name\s+of\s+registrant\b", table, re.I) and re.search(
         r"\bemployer\s+identification\b", table, re.I
     ):
@@ -870,6 +907,8 @@ def _registered_issuers(body: str) -> tuple[str, ...]:
             )
             if legal:
                 names.add(" ".join(legal[1].split()))
+    if not names:
+        names.update(_exact_name_issuers(header))
     return tuple(sorted(names))
 
 
@@ -976,6 +1015,20 @@ def _document_issuer_names(pages: list[tuple[str, str]]) -> dict[str, frozenset[
         names: set[str] = set()
         for issuer in issuers.values():
             names.add(_company_name(re.sub(r"\.(?:com|net|org)\b", "", issuer, flags=re.I)))
+            # Preserve a complete registered brand word whose initialism and
+            # lowercase suffix distinguish it from an ordinary leading word.
+            if brand := re.match(r"^(?:The\s+)?([A-Z]{2,}[a-z][A-Za-z0-9]{2,})\b", issuer):
+                names.add(_company_name(brand[1]))
+            # Ampersands and the word "and" are equivalent within a name.
+            # Remove legal suffixes first so "& Co." does not create an alias
+            # ending in "and" that could consume the next comparison subject.
+            words = list(_legal_issuer_words(issuer.replace("&", " and ")))
+            while words and words[-1] == "and":
+                words.pop()
+            core = " ".join(words)
+            for variant in (core, re.sub(r"\band\b", "&", core)):
+                if canonical := _company_name(variant):
+                    names.add(canonical)
             for body in bodies[document]:
                 names.update(_declared_issuer_names(body, issuer))
         result[document] = frozenset(names)
@@ -990,7 +1043,8 @@ def _mentioned_issuer_names(text: str, names: frozenset[str]) -> frozenset[str]:
         (start, end, name)
         for start in range(len(tokens))
         for end in range(start + 1, len(tokens) + 1)
-        if (name := "".join(tokens[start:end])) in names
+        for name in {"".join(tokens[start:end]), "".join(word for word in tokens[start:end] if word != "and")}
+        if name in names
     ]
     return frozenset(
         name

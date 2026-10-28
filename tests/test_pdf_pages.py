@@ -1521,6 +1521,161 @@ def test_joint_filing_registrants_remain_comparison_candidates(
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("column_header", [False, True])
+@pytest.mark.parametrize(
+    ("issuer", "spellings"),
+    [
+        ("BRIAR & LINDEN, INC.", ("Briar & Linden", "Briar and Linden")),
+        ("BRIAR and LINDEN, INC.", ("Briar & Linden", "Briar and Linden")),
+        ("QRSummit Partners Corporation", ("QRSummit Partners", "QRSummit")),
+    ],
+)
+def test_company_conjunctions_and_column_headers_preserve_comparison_evidence(
+    tmp_path: Path, column_header: bool, issuer: str, spellings: tuple[str, ...]
+) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'columns.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        cover = (
+            "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\nFORM 10-K\n{filing}\n{issuer}\n"
+            "(Exact name of registrant as specified in its charter)\n"
+            "Securities registered pursuant to Section 12(b) of the Act:\n"
+            "Title of each class Trading Symbol Name of Exchange\nCommon Stock {symbol} NASDAQ\n"
+            "Securities registered pursuant to Section 12(g): None"
+        )
+        filing = (
+            "For the fiscal year ended Commission file\nDecember 31, 2030 number 1-12345"
+            if column_header
+            else "Commission file number 1-12345"
+        )
+        bodies = (
+            (
+                "external-alpha",
+                cover.format(filing=filing, issuer=issuer, symbol="BRL"),
+            ),
+            (
+                "external-alpha",
+                "Consolidated Balance Sheets\n2030 Current assets 500. Current liabilities 250. "
+                "2029 Current assets 480. Current liabilities 260.",
+            ),
+            (
+                "external-beta",
+                cover.format(filing="Commission file number 1-54321", issuer="ROWAN CORPORATION", symbol="ROW"),
+            ),
+            (
+                "external-beta",
+                "Consolidated Balance Sheets\n2030 Current assets 150. Current liabilities 100. "
+                "2029 Current assets 140. Current liabilities 90.",
+            ),
+        )
+        expected = set()
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Column headers", summary="Spelled-out names", idempotency_key="columns")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, (document, body) in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id=document, document_sha256="e" * 64, page_number=number, text=body)
+                )
+                if number in {2, 4}:
+                    expected.add(source.name)
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            for spelling in spellings:
+                question = f"Compare {spelling} and Rowan current ratios in 2030."
+                citations = await search_pdf_pages(memory, question, 2)
+                found = {
+                    ref.source_id
+                    for citation in citations
+                    for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
+                }
+                assert len(citations) == 2 and found == expected
+                assert citations == await search_pdf_pages(memory, question, 2)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("policy", "question"),
+    [
+        (
+            "Product Warranties\nAccrued product warranty liabilities were 48 in 2030 and 46 in 2029. "
+            "The warranty balance is immaterial to our financial position and no further details are disclosed.",
+            "How much had Niverton set aside for repairing or replacing faulty products at its 2030 year end, "
+            "and why did it give no more detail?",
+        ),
+        (
+            "Shipping and Handling\nShipping and handling costs were 100 in 2030, 90 in 2029 and 80 in 2028. "
+            "These costs are included in selling, marketing and administrative expense.",
+            "How much did Niverton spend getting goods to customers in the three years in its 2030 accounts, "
+            "and where did it record those delivery costs?",
+        ),
+        (
+            "Research and Development Costs\nAll research and development costs are expensed as incurred. "
+            "Capitalized software development costs were not material to the financial statements in 2030 or 2029.",
+            "In its 2030 accounts, does Niverton charge the cost of creating new technology to the current period "
+            "or carry a significant amount forward as an asset?",
+        ),
+    ],
+)
+def test_policy_paraphrases_retrieve_the_accounting_note(tmp_path: Path, policy: str, question: str) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'policy.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        bodies = (
+            policy,
+            *(
+                f"Business review {number}. We discuss repairing and replacing faulty products, getting goods "
+                "to customers and creating new technology in the current period. "
+                "We review the amount carried forward as an asset and the costs of these business initiatives. " * 3
+                for number in range(28)
+            ),
+        )
+        expected = None
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Policies", summary="Paraphrased accounting questions", idempotency_key="policies")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, body in enumerate(bodies, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id="NIVERTON_2030", document_sha256="b" * 64, page_number=number, text=body)
+                )
+                if number == 1:
+                    expected = source.name
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            citations = await search_pdf_pages(memory, question, 20)
+            found = {
+                ref.source_id
+                for citation in citations
+                for ref in (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.sources
+            }
+            assert len(citations) == len(found) == 20 and expected in found
+            assert citations == await search_pdf_pages(memory, question, 20)
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("document", ["indexable-record", "!!!"])
 def test_document_label_searchability_does_not_truncate_evidence(tmp_path: Path, document: str) -> None:
     async def run() -> None:
