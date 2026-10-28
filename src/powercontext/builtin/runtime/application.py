@@ -293,7 +293,13 @@ from powercontext.builtin.work import (
 )
 from powercontext.context import PowerContext
 from powercontext.errors import ArtifactNotFoundError, RevisionConflictError, SourceConflictError
-from powercontext.sources import ConnectorBinding, SourceDefinitionManifest, SourceRef
+from powercontext.sources import (
+    ConnectorBinding,
+    SourceDefinitionManifest,
+    SourceObservation,
+    SourceProjectionKey,
+    SourceRef,
+)
 
 if TYPE_CHECKING:
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -2393,12 +2399,107 @@ class ReviewApplication:
         return ScopedReviewApplication(self._runtime, scope_id)
 
 
+async def _authorized_memory_source_refs(
+    service: MemoryService, artifact_id: str, citations: Sequence[MemoryCitation]
+) -> set[tuple[str, str]]:
+    """Collect Sources referenced by active entries or exact historical citations."""
+    authorized: set[tuple[str, str]] = set()
+    current = await _head_or_none(service, artifact_id)
+    if current is not None:
+        active = {
+            (item.entry_id, item.entry_version_id)
+            for item in current.content.manifest.entries
+            if item.state == "active"
+        }
+        authorized.update(
+            (ref.source_type, ref.source_id)
+            for entry in await service.entries(current)
+            if (entry.entry_id, entry.entry_version_id) in active
+            for ref in entry.sources
+        )
+    for citation in citations:
+        memory = await service.revision(citation.memory_ref)
+        _validate_memory_identity(artifact_id, memory)
+        entry = await _cited_entry(service, memory, citation)
+        authorized.update((ref.source_type, ref.source_id) for ref in entry.sources)
+    return authorized
+
+
+async def _scope_source_projections(
+    context: PowerContext[BuiltinSources, BuiltinArtifacts, BuiltinTriggers],
+    wanted: set[tuple[str, str]],
+    key: SourceProjectionKey,
+) -> dict[tuple[str, str], JsonValue]:
+    result: dict[tuple[str, str], JsonValue] = {}
+    if not wanted:
+        return result
+    for entry in await context.sources.journal.entries():
+        identity = (entry.source_ref.source_type, entry.source_ref.source_id)
+        if identity not in wanted:
+            continue
+        if isinstance(entry.source, SourceObservation):
+            for projection in entry.source.projections:
+                if projection.key == key:
+                    result[identity] = projection.value
+                    break
+        elif key in context.sources.catalog.projection_keys(entry.source):
+            result[identity] = context.sources.catalog.project(entry.source, key)
+    return result
+
+
 class ScopedMemoryApplication:
     """Operate one Memory Artifact identity and its Source trigger state."""
 
     def __init__(self, runtime: BuiltinRuntime, scope_id: str) -> None:
         self._runtime = runtime
         self.scope_id = validate_scope_id(scope_id)
+
+    async def source_projections(
+        self,
+        references: Sequence[SourceRef],
+        key: SourceProjectionKey,
+        /,
+        *,
+        citations: Sequence[MemoryCitation] = (),
+    ) -> dict[tuple[str, str], JsonValue]:
+        """Read projections of Sources referenced by active or cited Memory entries.
+
+        Missing and non-admitted Sources are omitted. Historical references can
+        be authorized by exact Memory citations. A mapping distinguishes an
+        absent Source or projection from a valid JSON null.
+        """
+        wanted = {(ref.source_type, ref.source_id) for ref in references}
+        async with self._runtime._context(self.scope_id) as context:
+            if not wanted:
+                return {}
+            wanted.intersection_update(
+                await _authorized_memory_source_refs(
+                    context.artifacts.memory, context.artifacts.memory_artifact_id, citations
+                )
+            )
+            return await _scope_source_projections(context, wanted, key)
+
+    async def list_with_source_projections(
+        self, key: SourceProjectionKey, /
+    ) -> tuple[MemoryEntriesPage, dict[tuple[str, str], JsonValue]]:
+        """List active entries and their scoped Source projections at one Memory head."""
+        async with self._runtime._context(self.scope_id) as context:
+            service = context.artifacts.memory
+            current = await _head_or_none(service, context.artifacts.memory_artifact_id)
+            if current is None:
+                return MemoryEntriesPage(memory_ref=None), {}
+            manifest = {(item.entry_id, item.entry_version_id): item.state for item in current.content.manifest.entries}
+            entries = tuple(
+                MemoryEntryRecord(
+                    memory_ref=current.as_ref(), state=manifest[(entry.entry_id, entry.entry_version_id)], entry=entry
+                )
+                for entry in await service.entries(current)
+                if manifest[(entry.entry_id, entry.entry_version_id)] == "active"
+            )
+            refs = {(ref.source_type, ref.source_id) for entry in entries for ref in entry.entry.sources}
+            return MemoryEntriesPage(memory_ref=current.as_ref(), entries=entries), await _scope_source_projections(
+                context, refs, key
+            )
 
     async def remember(self, request: RememberMemoryRequest, /) -> MemoryMutationResult:
         async with self._runtime._context(

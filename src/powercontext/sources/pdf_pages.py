@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 import math
 import re
+import unicodedata
 import zlib
 from collections import Counter
 from hashlib import sha256
@@ -41,6 +42,7 @@ from powercontext.builtin.artifacts.memory.models import MemoryCitation, MemoryH
 from powercontext.builtin.runtime.models import GetMemoryEntryRequest, SearchMemoryRequest
 from powercontext.sources._pdf_layout import positioned_page_text
 from powercontext.sources._pdf_unicode import LATIN_LIGATURES, restore_pdf_unicode
+from powercontext.sources._pdf_visible import visible_form_text
 from powercontext.sources.definitions import AdapterSourceDefinition
 from powercontext.sources.models import Source, SourceMaterialization
 from powercontext.sources.projections import TEXT_EVIDENCE_PROJECTION_KEY, TextEvidence
@@ -537,7 +539,7 @@ def _fragmented_letters(text: str) -> int:
 
 
 def _extract_page_text(page: PageObject) -> str:
-    text = page.extract_text() or ""
+    text = visible_form_text(page)
     if not text.strip():
         return ""
     # Plain extraction can insert spaces inside a word or join adjacent words
@@ -851,8 +853,17 @@ def _query_plan(question: str) -> tuple[tuple[str, ...], dict[str, float], tuple
     return searches, weights, tuple(dict.fromkeys(phrases))
 
 
+class _PDFHit(MemoryHit):
+    document_id: str
+    page_text: str
+
+
 def _document_name(hit: MemoryHit) -> str:
-    return hit.text.partition("\n")[0].strip()
+    return hit.document_id if isinstance(hit, _PDFHit) else hit.text.partition("\n")[0].strip()
+
+
+def _page_text(hit: MemoryHit) -> str:
+    return hit.page_text if isinstance(hit, _PDFHit) else hit.text.partition("\n")[2]
 
 
 def _company_name(document: str) -> str:
@@ -1082,6 +1093,82 @@ def _mentioned_issuer_names(text: str, names: frozenset[str]) -> frozenset[str]:
     )
 
 
+def _ambiguous_financial_entity_reference(question: str, entity_names: set[str]) -> bool:
+    """Detect an accounting acronym that could also identify a stored report."""
+
+    for word in set(re.findall(r"(?<![\w.-])[A-Za-z]{2,6}(?![\w.-])", question)):
+        normalized_word = word.casefold()
+        metric = normalized_word in {"ebitda", "ebit", "eps", "fcf", "nopat", "pnl"} or any(
+            pattern.fullmatch(normalized_word) for pattern, _phrases, _kinds in _METRIC_PATTERNS
+        )
+        if not metric or normalized_word not in entity_names:
+            continue
+        name = re.escape(word)
+        explicit = re.search(
+            rf"(?<![\w.-])\${name}\b|\b{name}['\u2019]s\b|"
+            rf"\b(?:ticker|symbol)\s*(?::|is)?\s*{name}\b|"
+            rf"\b{name}\s+(?:inc(?:orporated)?|corp(?:oration)?|company|co|plc|ltd|limited|llc|holdings)\b",
+            question,
+            re.I,
+        )
+        if not explicit:
+            return True
+    return False
+
+
+def _unresolved_comparison_reference(question: str, entity_names: set[str]) -> bool:
+    """Keep unknown named comparison subjects in the scoped candidate pool."""
+
+    comparison = re.search(r"\b(?:compare|between)\s+(.+)", question, re.I)
+    if not comparison:
+        return False
+
+    parts = re.split(r"\s+(and|with|versus|vs\.?)\s+", comparison[1], flags=re.I)
+    sides, connectors = parts[::2], parts[1::2]
+    if len(sides) < 2:
+        return False
+
+    def words(side: str) -> list[str]:
+        return re.findall(r"[a-z0-9]+", _normalize_question(side))
+
+    def known(side: str) -> bool:
+        tokens = words(side)
+        return any(
+            "".join(tokens[start:end]) in entity_names
+            for start in range(len(tokens))
+            for end in range(start + 1, len(tokens) + 1)
+        )
+
+    found = [known(side) for side in sides]
+    # A legal company name itself may contain "and". Mark adjacent sides
+    # together only when a complete known name spans that particular boundary.
+    for index, connector in enumerate(connectors):
+        left, right = words(sides[index]), words(sides[index + 1])
+        if connector.casefold() == "and" and any(
+            "".join([*left[start:], "and", *right[:end]]) in entity_names
+            or "".join(left[start:] + right[:end]) in entity_names
+            for start in range(len(left))
+            for end in range(1, len(right) + 1)
+        ):
+            found[index] = found[index + 1] = True
+    if not any(found) or all(found):
+        return False
+    vocabulary = set(_STOPWORDS)
+    vocabulary.update(word for triggers, _phrases in _CONCEPTS for word in triggers)
+    for _triggers, phrases in _CONCEPTS:
+        vocabulary.update(word for phrase in phrases for word in phrase.split())
+    for _pattern, phrases, _kinds in _METRIC_PATTERNS:
+        vocabulary.update(word for phrase in phrases for word in phrase.split())
+    vocabulary.update({"operating", "gross", "net", "total", "current", "invested", "return", "returns", "financial"})
+    return any(
+        word.casefold() not in vocabulary
+        and not any(pattern.fullmatch(word.casefold()) for pattern, _phrases, _kinds in _METRIC_PATTERNS)
+        for side, is_known in zip(sides, found, strict=True)
+        if not is_known
+        for word in re.findall(r"(?<![\w])[A-Z][A-Za-z0-9]*(?![\w])", side)
+    )
+
+
 def _target_documents(
     documents: frozenset[str],
     question: str,
@@ -1099,11 +1186,24 @@ def _target_documents(
     mentions = {"".join(tokens[start:end]) for start in range(len(tokens)) for end in range(start + 1, len(tokens) + 1)}
     years = set(re.findall(r"\b(?:19|20)\d{2}\b", normalized))
     # Preserve case here: an ordinary word such as "it" is not the ticker IT.
+    # The parts of financial abbreviations such as D&A or P&L are not
+    # individual ticker mentions. Preserve independent mentions like $D.
+    ticker_question = re.sub(r"(?<!\w)(?:D\s*&\s*A|P\s*&\s*L)(?!\w)", " ", question, flags=re.I)
     symbol_mentions = set(
-        re.findall(r"(?<![\w.-])\$?([A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)?)(?!\w|[.-][A-Za-z0-9])", question)
+        re.findall(r"(?<![\w.-])\$?([A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)?)(?!\w|[.-][A-Za-z0-9])", ticker_question)
     )
-    symbol_documents: set[str] = set()
     companies = {name: _company_name(name) for name in documents}
+    entity_names = set(companies.values()) | {symbol.casefold() for symbol in (symbols or {}).values()}
+    entity_names.update(name for names in (issuers or {}).values() for name in names)
+    # A financial abbreviation can also be a ticker, a complete document ID or
+    # an issuer's name. Restricting on an ambiguous mention can discard the
+    # actual subject, including one whose company name was not learned from the
+    # filing. Keep the full scoped pool unless the issuer reference is explicit.
+    if _ambiguous_financial_entity_reference(question, entity_names) or _unresolved_comparison_reference(
+        question, entity_names
+    ):
+        return frozenset()
+    symbol_documents: set[str] = set()
     for name, symbol in (symbols or {}).items():
         if symbol in symbol_mentions:
             symbol_documents.add(name)
@@ -1122,7 +1222,12 @@ def _target_documents(
     return frozenset(selected)
 
 
-async def _recall_documents(memory: Any, documents: frozenset[str], candidate_limit: int) -> list[MemoryHit]:
+async def _recall_documents(
+    memory: Any,
+    documents: frozenset[str],
+    candidate_limit: int,
+    inventory: dict[tuple[str, str, str], tuple[str, str]],
+) -> list[MemoryHit]:
     """Recall complete document pools through Memory's indexed public search API.
 
     A global top-k for common financial terms can omit an entire target page.
@@ -1135,25 +1240,48 @@ async def _recall_documents(memory: Any, documents: frozenset[str], candidate_li
     hits: list[MemoryHit] = []
     for document in sorted(documents):
         page = await memory.search(SearchMemoryRequest(query=document, mode="fts", limit=candidate_limit))
-        hits.extend(hit for hit in page.hits if _document_name(hit) == document)
+        for hit in page.hits:
+            identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
+            details = inventory.get(identity)
+            if details is not None and details[0] == document:
+                hits.append(_PDFHit(**hit.model_dump(), document_id=details[0], page_text=details[1]))
     return hits
 
 
 async def _pdf_inventory(
     memory: Any,
-) -> tuple[dict[tuple[str, str, str], str], int, dict[str, str], dict[str, frozenset[str]]]:
+) -> tuple[dict[tuple[str, str, str], tuple[str, str]], int, dict[str, str], dict[str, frozenset[str]]]:
     # Listing bounds the pool and identifies PDF entries. Candidate citations
     # still come exclusively from public Memory.search results.
-    stored = await memory.list()
-    inventory: dict[tuple[str, str, str], str] = {}
+    list_with_projections = getattr(memory, "list_with_source_projections", None)
+    if callable(list_with_projections):
+        stored, projections = await list_with_projections(TEXT_EVIDENCE_PROJECTION_KEY)
+    else:
+        stored, projections = await memory.list(), {}
+    inventory: dict[tuple[str, str, str], tuple[str, str]] = {}
     symbols: dict[str, set[str]] = {}
     pages: list[tuple[str, str]] = []
     for row in stored.entries:
-        if not any(ref.source_type == "pdf-page" for ref in row.entry.sources):
+        sources = tuple(ref for ref in row.entry.sources if ref.source_type == "pdf-page")
+        if len(sources) != 1:
             continue
         document, _, body = row.entry.text.partition("\n")
         document = document.strip()
-        inventory[(row.memory_ref.artifact_id, row.entry.entry_id, row.entry.entry_version_id)] = document
+        projection = projections.get((sources[0].source_type, sources[0].source_id))
+        if isinstance(projection, dict):
+            metadata = projection.get("metadata")
+            content = projection.get("content")
+            original = metadata.get("document_id") if isinstance(metadata, dict) else None
+            if (
+                isinstance(original, str)
+                and original.strip()
+                and isinstance(content, str)
+                and content.startswith(original + "\n")
+                and unicodedata.normalize("NFC", content).strip()
+                == unicodedata.normalize("NFC", row.entry.text).strip()
+            ):
+                document, body = original, content[len(original) + 1 :]
+        inventory[(row.memory_ref.artifact_id, row.entry.entry_id, row.entry.entry_version_id)] = (document, body)
         symbol = _common_stock_symbol(body)
         if symbol:
             symbols.setdefault(document, set()).add(symbol)
@@ -1229,7 +1357,7 @@ def _expand_document_terms(hits: list[MemoryHit], question: str, weights: dict[s
         if len(variant) >= 4
     }
     for hit in hits:
-        body = hit.text.partition("\n")[2]
+        body = _page_text(hit)
         if adjective_variants:
             names = {name.casefold() for name in re.findall(r"\b(?:[A-Z][a-z]{3,}|[A-Z]{4,})\b", body)}
             for name in sorted(adjective_variants & names):
@@ -1291,18 +1419,15 @@ def _diverse_pages(
     features = [
         frozenset(
             _stem(word)
-            for word in _WORDS.findall(hit.text.partition("\n")[2].casefold())
+            for word in _WORDS.findall(_page_text(hit).casefold())
             if not word.isdigit() and word not in _STOPWORDS
         )
         for _, hit in scores
     ]
     documents = [_document_name(hit) for _, hit in scores]
-    cash_totals = [_cash_table_totals(hit.text.partition("\n")[2]) for _, hit in scores]
+    cash_totals = [_cash_table_totals(_page_text(hit)) for _, hit in scores]
     requested_years = frozenset(re.findall(r"\b(?:19|20)\d{2}\b", question))
-    years = [
-        requested_years.intersection(re.findall(r"\b(?:19|20)\d{2}\b", hit.text.partition("\n")[2]))
-        for _, hit in scores
-    ]
+    years = [requested_years.intersection(re.findall(r"\b(?:19|20)\d{2}\b", _page_text(hit))) for _, hit in scores]
     chosen = [index for index, (_, hit) in enumerate(scores) if hit in anchors]
     # Preserve the order of complementary statement anchors.
     chosen.sort(key=lambda index: anchors.index(scores[index][1]))
@@ -1352,7 +1477,7 @@ def _balance_supporting_pages(
         for hit in group
         if titles[(hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)]["balance"]
         and f" {operand_words} "
-        in " " + " ".join(_stem(word) for word in _WORDS.findall(hit.text.partition("\n")[2].casefold())) + " "
+        in " " + " ".join(_stem(word) for word in _WORDS.findall(_page_text(hit).casefold())) + " "
     ]
     if titled:
         return titled
@@ -1370,7 +1495,7 @@ def _balance_supporting_pages(
     for hit in group:
         labels = {
             " ".join(_stem(word) for word in _WORDS.findall(label.casefold()))
-            for label in row_pattern.findall(hit.text.partition("\n")[2])
+            for label in row_pattern.findall(_page_text(hit))
         }
         if len(labels) >= 3 and any(f" {operand_words} " in f" {label} " for label in labels):
             supporting.append(hit)
@@ -1388,7 +1513,7 @@ def _cash_statement_complements(
     supporting = [hit for hit in group if titles[identity(hit)]["cash"] >= (8 if quality >= 8 else 2)]
     sections = {}
     for hit in supporting:
-        body = " ".join(_WORDS.findall(hit.text.partition("\n")[2].casefold()))
+        body = " ".join(_WORDS.findall(_page_text(hit).casefold()))
         sections[identity(hit)] = {pattern for pattern in _STATEMENT_ITEMS["cash"] if re.search(pattern, body)}
     covered = set(sections[identity(best)])
     result = []
@@ -1513,7 +1638,7 @@ def _rank_pages(
     query_tokens = re.findall(r"[a-z0-9]+", _normalize_question(question))
     companies = {_company_name(document) for document in targets}
     issuer_groups = _document_issuer_groups([
-        (_document_name(hit), hit.text.partition("\n")[2]) for hit in hits if _document_name(hit) in targets
+        (_document_name(hit), _page_text(hit)) for hit in hits if _document_name(hit) in targets
     ])
     company_names = {
         document: frozenset(name for group in groups for name in group) for document, groups in issuer_groups.items()
@@ -1531,7 +1656,7 @@ def _rank_pages(
         for word in query_tokens[start:end]
     }
     weights = {term: weight for term, weight in weights.items() if term not in subject_terms} or weights
-    search_bodies = [_normalize_country_names(hit.text.partition("\n")[2]).casefold() for hit in hits]
+    search_bodies = [_normalize_country_names(_page_text(hit)).casefold() for hit in hits]
     tokens = [[_stem(word) for word in _WORDS.findall(body)] for body in search_bodies]
     terms = [Counter(words) for words in tokens]
     # Repeated cash tables must not make their labels uninformative merely
@@ -1569,7 +1694,7 @@ def _rank_pages(
             default=0.0,
         )
         score = 0.5 * page_score + passage_score
-        document, _, body = hit.text.partition("\n")
+        document, body = _document_name(hit), _page_text(hit)
         document_terms = set(_WORDS.findall(document.casefold()))
         # A question's company and reporting year identify the document, while
         # the body determines the evidence page within it.
@@ -1616,13 +1741,13 @@ async def _page_candidates(
     inventory, total_entries, symbols, issuers = await _pdf_inventory(memory)
     if not inventory:
         return [], {}, frozenset()
-    documents = frozenset(inventory.values())
+    documents = frozenset(document for document, _body in inventory.values())
     targets = _target_documents(documents, question, symbols, issuers)
     selected_documents = targets or documents
-    eligible = {identity for identity, document in inventory.items() if document in selected_documents}
+    eligible = {identity for identity, (document, _body) in inventory.items() if document in selected_documents}
     candidates: dict[tuple[str, str, str], MemoryHit] = {}
     votes: dict[tuple[str, str, str], float] = {}
-    for hit in await _recall_documents(memory, selected_documents, total_entries):
+    for hit in await _recall_documents(memory, selected_documents, total_entries, inventory):
         identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
         if identity in eligible:
             candidates[identity] = hit
@@ -1637,7 +1762,8 @@ async def _page_candidates(
         for rank, hit in enumerate(page.hits, start=1):
             identity = (hit.memory_ref.artifact_id, hit.entry_id, hit.entry_version_id)
             if identity in eligible:
-                candidates[identity] = hit
+                document, body = inventory[identity]
+                candidates[identity] = _PDFHit(**hit.model_dump(), document_id=document, page_text=body)
                 votes[identity] = votes.get(identity, 0.0) + 1.0 / (60 + rank)
     return list(candidates.values()), votes, targets
 

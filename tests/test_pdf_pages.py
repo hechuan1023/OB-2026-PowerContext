@@ -735,6 +735,91 @@ def test_target_company_pages_are_not_displaced_by_another_reports_keyword_densi
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(
+    ("other_document", "other_issuer"),
+    [
+        ("opaque-other", "RETAIL OPPORTUNITY INVESTMENTS CORPORATION"),
+        ("ROIC_2022_10K", "RETAIL OPPORTUNITY INVESTMENTS CORPORATION"),
+        ("opaque-other", "ROIC CORPORATION"),
+    ],
+)
+def test_financial_acronym_and_ticker_ambiguity_preserves_relevant_reports(
+    tmp_path: Path, other_document: str, other_issuer: str
+) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'acronym.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        cover = (
+            "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\nFORM 10-K\n"
+            f"Commission File Number: 1-12345\n{other_issuer}\n"
+            "Securities registered pursuant to Section 12(b) of the Act:\n"
+            "Title of each class Trading Symbol Name of Exchange\nCommon Stock ROIC NASDAQ\n"
+            "Securities registered pursuant to Section 12(g): None"
+        )
+        pages = (
+            (
+                "opaque-briar",
+                "Briar Corporation\n2022 Annual Report\nReturn on invested capital (ROIC) was 8 percent. "
+                "Revenue in 2022 was 100 million.",
+            ),
+            (other_document, cover),
+            (other_document, "Revenue from retail property operations in 2022 was 500 million."),
+            ("LINDEN_2022_10K", "Linden revenue in 2022 was 250 million."),
+        )
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Acronym", summary="Financial terms and symbols", idempotency_key="acronym")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, (document, body) in enumerate(pages, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id=document, document_sha256="f" * 64, page_number=number, text=body)
+                )
+                locations[source.name] = number
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            questions = (
+                (f"Compare {other_issuer} and Linden and Briar revenue in 2022.", {1, 3, 4}, False),
+                (f"Compare Briar and {other_issuer} and Linden revenue in 2022.", {1, 3, 4}, False),
+                (f"Compare {other_issuer} and Linden revenue in 2022.", {3, 4}, True),
+                (f"Compare {other_issuer} and Briar revenue in 2022.", {1, 3}, False),
+                (f"Compare Briar and {other_issuer} revenue in 2022.", {1, 3}, False),
+                (f"What is the difference between {other_issuer} and Briar revenue in 2022?", {1, 3}, False),
+                ("What was Briar's ROIC in 2022?", {1}, False),
+                ("What was Briar's roic in 2022?", {1}, False),
+                ("Compare ROIC and Briar revenue in 2022.", {1, 3}, False),
+                ("What was $ROIC revenue in 2022?", {3}, True),
+                ("What was ticker ROIC revenue in 2022?", {3}, True),
+                ("What was ROIC's revenue in 2022?", {3}, True),
+                ("Compare net income and revenue for ticker ROIC in 2022.", {3}, True),
+            )
+            for question, expected, explicitly_other in questions:
+                citations = await search_pdf_pages(memory, question, 20)
+                found = set()
+                for citation in citations:
+                    entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                    number = locations[entry.sources[0].source_id]
+                    assert entry.text == f"{pages[number - 1][0]}\n{pages[number - 1][1]}"
+                    found.add(number)
+                assert expected <= found, question
+                if explicitly_other:
+                    assert 1 not in found, question
+                assert len(citations) == len(found)
+                assert citations == await search_pdf_pages(memory, question, 20)
+
+    asyncio.run(run())
+
+
 def test_company_symbols_and_comparison_operands_survive_restart(tmp_path: Path) -> None:
     async def run() -> None:
         config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'symbols.db'}"))
@@ -2253,5 +2338,67 @@ def test_calculation_and_split_cash_flow_evidence_survive_top_twenty(
                 assert len(returned) == len(set(returned)) == 20
                 assert expected <= set(returned)
                 assert citations == await search_pdf_pages(memory, question, 20)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(("acronym", "ticker"), [("D&A", "D"), ("D & A", "A"), ("P&L", "P"), ("P & L", "L")])
+def test_compound_financial_acronym_does_not_identify_single_letter_tickers(
+    tmp_path: Path, acronym: str, ticker: str
+) -> None:
+    async def run() -> None:
+        config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'ampersand.db'}"))
+        registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+        cover = (
+            "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\nFORM 10-K\n"
+            "Commission File Number: 1-12345\nMERIDIAN CORPORATION\n"
+            "Securities registered pursuant to Section 12(b) of the Act:\n"
+            f"Title of each class Trading Symbol Name of Exchange\nCommon Stock {ticker} NASDAQ\n"
+            "Securities registered pursuant to Section 12(g): None"
+        )
+        pages = (
+            ("opaque-briar", "Briar Corporation\nDepreciation and amortization and income statement information."),
+            ("opaque-meridian", cover),
+            ("opaque-meridian", "Meridian revenue and depreciation 30."),
+        )
+        locations = {}
+        async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+            assert runtime.scopes is not None
+            scope = await runtime.scopes.create(
+                ScopeDraft(title="Financial acronym", summary="Single letter symbol", idempotency_key="ampersand")
+            )
+            await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+            for number, (document, body) in enumerate(pages, 1):
+                source = await registry.resolve(
+                    PDFPageInput(document_id=document, document_sha256="d" * 64, page_number=number, text=body)
+                )
+                locations[source.name] = number
+                await runtime.ingestion.submit(
+                    SubmitSourceObservation(
+                        scope_id=scope.scope_id, observation=project_source_for_transport(registry, source)
+                    )
+                )
+            memory = runtime.memory.for_scope(scope.scope_id)
+            while (await memory.flush()).processed:
+                pass
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope.scope_id)
+            for question, expected, ticker_only in (
+                (f"What was Briar's {acronym} in 2022?", 1, False),
+                (f"What was ${ticker}'s {acronym} in 2022?", 3, True),
+                (f"What was ticker {ticker} {acronym} in 2022?", 3, True),
+            ):
+                refs = await search_pdf_pages(memory, question, 20)
+                found = set()
+                for citation in refs:
+                    entry = (await memory.get(GetMemoryEntryRequest(citation=citation))).entry
+                    number = locations[entry.sources[0].source_id]
+                    assert entry.text == f"{pages[number - 1][0]}\n{pages[number - 1][1]}"
+                    found.add(number)
+                assert expected in found, (question, found)
+                if ticker_only:
+                    assert 1 not in found, (question, found)
+                assert len(refs) == len(found)
+                assert refs == await search_pdf_pages(memory, question, 20)
 
     asyncio.run(run())
