@@ -1,5 +1,5 @@
 # 验证运行记录（demo_feature_change.py）
-时间：2026-10-30T00:02:44
+时间：2026-10-30T00:15:41
 模式：use-submitted
 
 | 步骤 | 预期 | 实际 | 结果 |
@@ -32,7 +32,7 @@ Traceback (most recent call last):
 AttributeError: 'Order' object has no attribute 'expensive_items'
 
 ----------------------------------------------------------------------
-Ran 4 tests in 0.003s
+Ran 4 tests in 0.002s
 
 FAILED (errors=4)
 
@@ -47,7 +47,7 @@ test_none_match_returns_empty (tests.test_order_filter.OrderExpensiveItemsTest.t
 test_sorted_by_subtotal_desc (tests.test_order_filter.OrderExpensiveItemsTest.test_sorted_by_subtotal_desc) ... ok
 
 ----------------------------------------------------------------------
-Ran 4 tests in 0.000s
+Ran 4 tests in 0.001s
 
 OK
 
@@ -57,7 +57,7 @@ OK
 
 ```
 {
-  "snapshot_id": "5fe3dea700ba3f16",
+  "snapshot_id": "d03c79ab9a176547",
   "task": "订单明细按小计筛选（ORDER-FILTER-001）：Order.expensive_items(min_subtotal_cents)，边界阈值 0 返回全部",
   "total": 2,
   "still_valid": 2,

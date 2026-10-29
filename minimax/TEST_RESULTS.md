@@ -1,8 +1,7 @@
 # 测试结果
 
-代码版本：分支 `feature/minimax-submission`（基于 `ab7d16a`）；
-环境：Windows 10 x64，Python 3.11.9。
-每条记录命令、退出码与输出摘要。
+代码版本：分支 `feature/minimax-submission`（基于 `ab7d16a`）；最终实现由 MiniMax Code（MiniMax-M3.1-Flash）生成，见 `records/minimax-dev-record.md`。
+环境：Windows 10 x64，Python 3.11.9。每条记录命令与退出码。
 
 ## 1. 目标功能测试（修改前：预期失败）
 ```
@@ -95,15 +94,5 @@ exit=0
   [PASS] 步骤 5a 目标测试（修改后）  (rc=0)
   [PASS] 步骤 5b 回归测试  (rc=0)
   [PASS] 步骤 6 状态保存→重启→回查  (rc=0/0)
-exit=0
-```
-
-## 6. DB 链路（init/import/query，真实 OceanBase）
-```
-code           10
-contract       1
-decision       5
-spec           6
-verification   5
 exit=0
 ```

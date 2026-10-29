@@ -1,11 +1,11 @@
 {
   "snapshot_version": 1,
-  "created_at": "2026-10-29T16:02:46+00:00",
+  "created_at": "2026-10-29T16:15:43+00:00",
   "project": "sample-app",
   "code_root": "E:\\MINIOB\\mini-ob\\OB-2026-PowerContext\\examples\\sdd-context-manager\\sample-app",
   "task": {
     "text": "订单明细按小计筛选（ORDER-FILTER-001）：Order.expensive_items(min_subtotal_cents)，边界阈值 0 返回全部",
-    "session_id": "demo-2026-10-30T00:02:44"
+    "session_id": "demo-2026-10-30T00:15:41"
   },
   "artifacts": {
     "SPEC-001": {
@@ -77,7 +77,7 @@
       ]
     }
   },
-  "code_fingerprint": "71cb7628305748209c543331fd61d423c325655a7400c4ad8ca461cd50e256e6",
+  "code_fingerprint": "ddc7748ad3ef75e8be8e6838e4c0a8ba213dfd66b1415156fa47c3a181f8de6b",
   "covered_files": [
     "app/order.py",
     "app/payment.py",
@@ -88,5 +88,5 @@
   "decisions_made": [
     "ORDER-FILTER-001 实现为 expensive_items(min_subtotal_cents)"
   ],
-  "snapshot_id": "5fe3dea700ba3f16"
+  "snapshot_id": "d03c79ab9a176547"
 }

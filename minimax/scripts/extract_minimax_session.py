@@ -55,7 +55,11 @@ def load_messages(sess: Path):
 
 def text_of(msg) -> str:
     """尽力从消息结构里抽出文本（不同版本字段可能不同）。"""
-    for key in ("content", "text", "message", "parts"):
+    if isinstance(msg, dict) and isinstance(msg.get("message"), dict):
+        inner = msg["message"]
+        head = inner.get("role") or inner.get("type") or "message"
+        return "[%s] %s" % (head, text_of(inner))
+    for key in ("content", "text", "parts"):
         v = msg.get(key) if isinstance(msg, dict) else None
         if isinstance(v, str):
             return v

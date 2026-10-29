@@ -2,14 +2,15 @@
 
 ## 1. 开发任务
 ORDER-FILTER-001：`Order` 增加 `expensive_items(min_subtotal_cents)` 明细筛选。
-完整要求见 `minimax/TASK_ORDER_FILTER.md`（要改什么 / 必须保持的原有行为）。
+完整要求见 `minimax/TASK_ORDER_FILTER.md`；**实现由 MiniMax Code（MiniMax-M3.1-Flash）完成**，
+开发记录见 `minimax/records/minimax-dev-record.md`。
 
 ## 2. 修改前后快照
 - 修改前：`minimax/snapshots/order_before.py`（与基线 `ab7d16a` 的 `app/order.py` 一致）
-- 修改后：`minimax/snapshots/order_after.py`（提交状态）
+- 修改后：`minimax/snapshots/order_after.py`（提交状态 = MiniMax Code 会话的最终产出）
 - 重现红→绿：`python minimax/scripts/reset_sample.sh before|after`
 
-## 3. 代码差异（app/order.py，+11 行）
+## 3. 代码差异（app/order.py，+11 行，与开发记录中模型输出一致）
 ```diff
 @@ -29,3 +29,14 @@
          if not is_discount_eligible(subtotal) or not self.discount_rate:
@@ -19,7 +20,7 @@ ORDER-FILTER-001：`Order` 增加 `expensive_items(min_subtotal_cents)` 明细�
 +    def expensive_items(self, min_subtotal_cents: int):
 +        """筛选小计不低于 ``min_subtotal_cents`` 的商品明细，按小计降序。
 +
-+        小计 = 数量 × 单价（分）。同小计的明细保持输入顺序；
++        小计 = 数量 × 单价（分）。同小计的明细保持输入顺序（稳定排序）；
 +        ``min_subtotal_cents <= 0`` 时视为 0，返回全部明细（同样按小计降序）。
 +        """
 +        threshold = max(int(min_subtotal_cents), 0)
@@ -29,7 +30,7 @@ ORDER-FILTER-001：`Order` 增加 `expensive_items(min_subtotal_cents)` 明细�
 ```
 
 ## 4. 新增功能测试
-`examples/sdd-context-manager/sample-app/tests/test_order_filter.py`（4 例）：
+`examples/sdd-context-manager/sample-app/tests/test_order_filter.py`（4 例，含边界 0 / 负数）：
 
 ```python
 """订单明细筛选的目标功能测试（开发任务 ORDER-FILTER-001）。
@@ -73,11 +74,9 @@ if __name__ == "__main__":
 ```
 
 ## 5. 配套材料变更（非业务代码）
-- `sample-app/docs/requirements.md`：新增 SPEC-101（任务规格，来源真实）
-- `sample-app/docs/decisions.md`：新增 ADR-101（排序与边界语义）
-- `sample-app/context.template.json`：新增 SPEC-101 / ADR-101 / VERIFY-101 制品条目
-- `minimax/`：本题材料（运行说明、验证样例、测试结果、技术使用记录、脚本与快照）
+- `sample-app/docs/requirements.md`：SPEC-101；`docs/decisions.md`：ADR-101
+- `sample-app/context.template.json`：SPEC-101 / ADR-101 / VERIFY-101 制品条目
+- `minimax/`：本题材料与脚本
 
 ## 6. 回归说明
-业务代码仅 `app/order.py` 新增一个方法，未改动任何既有函数；
-回归测试 14 例（含模块 69 例）全部通过，见 `minimax/TEST_RESULTS.md`。
+业务代码仅 `app/order.py` 新增一个方法；回归 14 例与模块 69 例全部通过，见 `minimax/TEST_RESULTS.md`。
