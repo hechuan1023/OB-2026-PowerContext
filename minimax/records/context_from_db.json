@@ -1,0 +1,369 @@
+{
+  "project": "sample-app",
+  "code_root": ".",
+  "artifacts": [
+    {
+      "id": "SPEC-001",
+      "kind": "spec",
+      "title": "订单总价与折扣的计算规则（v2）",
+      "summary": "金额以「分」为单位；满 100 元可享折扣；折扣在服务端按订单维度算一次；结果四舍五入到分。",
+      "body": "1. 所有金额以「分」为最小单位的整数表示，禁止使用浮点金额。\n2. 订单商品小计达到 10000 分才可享受折扣。\n3. 折扣在服务端按订单维度计算一次，不做逐行商品折扣。\n4. 折扣后金额四舍五入到分。",
+      "status": "active",
+      "version": 2,
+      "priority": 10,
+      "source": "docs/requirements.md",
+      "effective_from": "2026-03-01",
+      "conflict_key": "pricing-rule",
+      "scope": [
+        "app/pricing.py",
+        "app/order.py"
+      ],
+      "tags": [
+        "pricing",
+        "order",
+        "money"
+      ],
+      "keywords": [
+        "折扣",
+        "总价",
+        "取整",
+        "四舍五入",
+        "金额",
+        "定价",
+        "订单"
+      ]
+    },
+    {
+      "id": "SPEC-003",
+      "kind": "spec",
+      "title": "支付超时与重试策略（v2）",
+      "summary": "单次支付默认超时 3 秒可配置；最多重试 3 次、间隔 200ms；金额非法不重试。",
+      "body": "1. 单次支付调用超时默认 3 秒，可按调用方配置。\n2. 失败后最多重试 3 次，重试间隔 200ms。\n3. 金额非法时不重试，直接失败。",
+      "status": "active",
+      "version": 2,
+      "priority": 10,
+      "source": "docs/requirements.md",
+      "effective_from": "2026-06-20",
+      "supersedes": [
+        "SPEC-002"
+      ],
+      "conflict_key": "payment-retry",
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "payment",
+        "retry"
+      ],
+      "keywords": [
+        "支付",
+        "重试",
+        "超时",
+        "退避"
+      ]
+    },
+    {
+      "id": "SPEC-101",
+      "kind": "spec",
+      "title": "订单明细按小计筛选",
+      "summary": "Order.expensive_items 按商品小计筛选明细，降序返回，阈值<=0 视为 0。",
+      "body": "1. 小计 = 数量 × 单价（分），保留小计不低于阈值的明细。\n2. 结果按小计降序，同小计保持输入顺序。\n3. 阈值 <= 0 视为 0，返回全部明细（同样降序）。\n4. 不改变订单总价与折扣规则（SPEC-001）。",
+      "status": "active",
+      "version": 1,
+      "priority": 8,
+      "source": "docs/requirements.md",
+      "effective_from": "2026-06-01",
+      "scope": [
+        "app/order.py"
+      ],
+      "tags": [
+        "order",
+        "filter"
+      ],
+      "keywords": [
+        "筛选",
+        "明细",
+        "小计",
+        "降序",
+        "订单"
+      ]
+    },
+    {
+      "id": "SPEC-004",
+      "kind": "spec",
+      "title": "支付超时与重试策略（v1 遗留副本，未标记失效）",
+      "summary": "团队在 SPEC-002 被取代时忘了清理的旧版本，它自己仍写着 active。",
+      "body": "遗留副本：支付调用固定超时 3 秒，失败后固定重试 3 次。",
+      "status": "active",
+      "version": 1,
+      "priority": 0,
+      "source": "docs/requirements.md",
+      "effective_from": "2026-02-01",
+      "conflict_key": "payment-retry",
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "payment",
+        "retry",
+        "legacy"
+      ],
+      "keywords": [
+        "支付",
+        "重试",
+        "超时"
+      ]
+    },
+    {
+      "id": "ADR-004",
+      "kind": "decision",
+      "title": "支付重试固定退避 200ms",
+      "summary": "重试间隔固定 200ms，不做指数退避。",
+      "body": "决定：重试间隔固定 200ms。\n理由：网关故障通常在秒级恢复，指数退避会让用户多等。",
+      "status": "active",
+      "version": 1,
+      "priority": 10,
+      "source": "docs/decisions.md",
+      "effective_from": "2026-04-02",
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "payment",
+        "decision"
+      ],
+      "keywords": [
+        "重试",
+        "退避",
+        "支付"
+      ]
+    },
+    {
+      "id": "ADR-101",
+      "kind": "decision",
+      "title": "明细筛选的排序与边界语义",
+      "summary": "筛选结果按小计降序、稳定排序；阈值<=0 统一按 0 处理。",
+      "body": "决定：稳定排序降序；阈值 <= 0 视为 0。",
+      "status": "active",
+      "version": 1,
+      "priority": 6,
+      "source": "docs/decisions.md",
+      "effective_from": "2026-06-01",
+      "scope": [
+        "app/order.py"
+      ],
+      "tags": [
+        "order",
+        "filter"
+      ],
+      "keywords": [
+        "排序",
+        "边界",
+        "筛选"
+      ]
+    },
+    {
+      "id": "VERIFY-101",
+      "kind": "verification",
+      "title": "订单明细筛选目标测试",
+      "summary": "验证 expensive_items 的筛选、排序与边界阈值行为",
+      "body": "",
+      "status": "active",
+      "version": 1,
+      "priority": 9,
+      "source": "tests/test_order_filter.py",
+      "targets": [
+        "app/order.py"
+      ],
+      "test_path": "tests/test_order_filter.py",
+      "validates": [
+        "SPEC-101",
+        "ADR-101"
+      ],
+      "command": "python -m unittest tests.test_order_filter -v",
+      "recorded_at": "2026-06-01",
+      "scope": [
+        "app/order.py"
+      ],
+      "tags": [
+        "test",
+        "order"
+      ],
+      "keywords": [
+        "筛选",
+        "测试",
+        "边界",
+        "订单"
+      ]
+    },
+    {
+      "id": "VERIFY-004",
+      "kind": "verification",
+      "title": "支付重试早期用例（随 SPEC-002 一起提交）",
+      "summary": "验证的是已被取代的 SPEC-002 v1，应当被标记为 superseded_spec",
+      "body": "",
+      "status": "active",
+      "version": 1,
+      "priority": 0,
+      "source": "tests/test_payment_retry_legacy.py",
+      "targets": [
+        "app/payment.py"
+      ],
+      "test_path": "tests/test_payment_retry_legacy.py",
+      "validates": [
+        "SPEC-002"
+      ],
+      "command": "python -m unittest discover -s tests",
+      "recorded_at": "2026-02-01",
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "test",
+        "payment",
+        "legacy"
+      ],
+      "keywords": [
+        "重试",
+        "超时",
+        "支付"
+      ]
+    },
+    {
+      "id": "tests/test_order_filter.py",
+      "kind": "code",
+      "title": "tests/test_order_filter.py",
+      "summary": "\"\"\"订单明细筛选的目标功能测试（开发任务 ORDER-FILTER-001）。",
+      "body": "\"\"\"订单明细筛选的目标功能测试（开发任务 ORDER-FILTER-001）。\n\n验证样例中\"要改什么\"：Order 增加 ``expensive_items`` 筛选方法——\n返回小计不低于给定金额的商品明细，按小计降序排列。\n\n\"哪些原有行为必须保持\"：订单小计、折扣判定与总价计算的行为不得变化，\n见 test_order.py / test_pricing.py 的既有断言。\n\"\"\"\n\nimport unittest\n\nfrom app.order import Order\n\n\nclass OrderExpensiveItemsTest(unittest.TestCase):\n    def test_filter_by_min_subtotal(self):\n        # 小计：(2,500)=1000、(1,300)=300、(3,200)=600；阈值 600 → 保留 1000/600\n        order = Order(\"O-F1\", [(2, 500), (1, 300), (3, 200)])\n        self.assertEqual(order.expensive_items(600), [(2, 500), (3, 200)])\n\n    def test_sorted_by_subtotal_desc(self):\n        # 输入乱序；(4,250) 与 (2,500) 小计同为 1000，同小计保持输入顺序\n        order = Order(\"O-F2\", [(1, 300), (4, 250), (2, 500)])\n        self.assertEqual(order.expensive_items(600), [(4, 250), (2, 500)])\n\n    def test_none_match_returns_empty(self):\n        order = Order(\"O-F3\", [(1, 100), (2, 50)])\n        self.assertEqual(order.expensive_items(1000), [])\n\n    def test_boundary_zero_returns_all_sorted(self):\n        # 边界输入：阈值 <= 0 返回全部明细（同样按小计降序）\n        order = Order(\"O-F4\", [(1, 300), (2, 500)])\n        self.assertEqual(order.expensive_items(0), [(2, 500), (1, 300)])\n        self.assertEqual(order.expensive_items(-1), [(2, 500), (1, 300)])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+      "status": "active",
+      "version": 0,
+      "priority": 0,
+      "source": "tests/test_order_filter.py",
+      "scope": [
+        "tests/test_order_filter.py"
+      ],
+      "tags": [
+        "code"
+      ],
+      "keywords": [
+        "test",
+        "order",
+        "filter"
+      ]
+    },
+    {
+      "id": "tests/test_payment_retry_legacy.py",
+      "kind": "code",
+      "title": "tests/test_payment_retry_legacy.py",
+      "summary": "\"\"\"支付重试的早期用例，随 SPEC-002（v1）一起提交。",
+      "body": "\"\"\"支付重试的早期用例，随 SPEC-002（v1）一起提交。\n\nSPEC-002 后来被 SPEC-003 取代了，但这个用例文件还留在仓库里。\n上下文模块应该把这条验证标成 ``superseded_spec``——它验证的是一份已经作废的要求。\n\"\"\"\n\nimport unittest\n\nfrom app.payment import DEFAULT_MAX_RETRY, DEFAULT_TIMEOUT_SECONDS\n\n\nclass LegacyRetryPolicyTest(unittest.TestCase):\n    def test_fixed_timeout_and_retry(self):\n        # 这正是 SPEC-002 v1 规定的固定策略\n        self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 3)\n        self.assertEqual(DEFAULT_MAX_RETRY, 3)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+      "status": "active",
+      "version": 0,
+      "priority": 0,
+      "source": "tests/test_payment_retry_legacy.py",
+      "scope": [
+        "tests/test_payment_retry_legacy.py"
+      ],
+      "tags": [
+        "code"
+      ],
+      "keywords": [
+        "test",
+        "payment",
+        "retry",
+        "legacy"
+      ]
+    },
+    {
+      "id": "app/order.py",
+      "kind": "code",
+      "title": "app/order.py",
+      "summary": "\"\"\"订单：把商品明细算成订单总价。",
+      "body": "\"\"\"订单：把商品明细算成订单总价。\n\n订单总价 = 商品小计 → 判定是否满足折扣门槛 → 打折扣 → 得到最终金额。\n\"\"\"\n\nfrom .pricing import apply_discount, is_discount_eligible\n\n\nclass Order:\n    \"\"\"一个订单。\n\n    :param order_id: 订单号\n    :param items: ``[(数量, 单价（分）), ...]``\n    :param discount_rate: 折扣率，0 表示不打折\n    \"\"\"\n\n    def __init__(self, order_id: str, items, discount_rate: float = 0.0) -> None:\n        self.order_id = order_id\n        self.items = list(items)\n        self.discount_rate = discount_rate\n\n    def subtotal_cents(self) -> int:\n        \"\"\"商品小计（单位：分）。\"\"\"\n        return sum(quantity * unit_price for quantity, unit_price in self.items)\n\n    def total_cents(self) -> int:\n        \"\"\"订单最终金额（单位：分）。\"\"\"\n        subtotal = self.subtotal_cents()\n        if not is_discount_eligible(subtotal) or not self.discount_rate:\n            return subtotal\n        return apply_discount(subtotal, self.discount_rate)\n",
+      "status": "active",
+      "version": 0,
+      "priority": 0,
+      "source": "app/order.py",
+      "scope": [
+        "app/order.py"
+      ],
+      "tags": [
+        "code"
+      ],
+      "keywords": [
+        "order"
+      ]
+    },
+    {
+      "id": "app/payment.py",
+      "kind": "code",
+      "title": "app/payment.py",
+      "summary": "\"\"\"支付网关调用。",
+      "body": "\"\"\"支付网关调用。\n\n对外契约见 CTR-001：``charge`` 成功返回支付流水号，失败抛 ``PaymentError``。\n\"\"\"\n\nDEFAULT_TIMEOUT_SECONDS = 3\nDEFAULT_MAX_RETRY = 3\nRETRY_BACKOFF_SECONDS = 0.2\n\n\nclass PaymentError(Exception):\n    \"\"\"支付失败（重试耗尽或参数非法）。\"\"\"\n\n\ndef charge(\n    amount_cents: int,\n    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,\n    max_retry: int = DEFAULT_MAX_RETRY,\n) -> str:\n    \"\"\"发起一笔支付。\n\n    :param amount_cents: 金额（单位：分），必须为正\n    :param timeout_seconds: 单次调用超时时间\n    :param max_retry: 最大重试次数\n    :return: 支付流水号\n    :raises PaymentError: 金额非法，或重试耗尽仍然失败\n    \"\"\"\n    if amount_cents <= 0:\n        raise PaymentError(\"金额必须为正，收到 %d\" % amount_cents)\n    if max_retry < 1:\n        raise PaymentError(\"至少要重试一次\")\n    return \"PAY-%08d\" % amount_cents\n",
+      "status": "active",
+      "version": 0,
+      "priority": 0,
+      "source": "app/payment.py",
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "code"
+      ],
+      "keywords": [
+        "payment"
+      ]
+    },
+    {
+      "id": "app/pricing.py",
+      "kind": "code",
+      "title": "app/pricing.py",
+      "summary": "\"\"\"价格与折扣计算。",
+      "body": "\"\"\"价格与折扣计算。\n\n约定：所有金额一律以「分」为最小单位的整数表示，不使用浮点金额。\n\"\"\"\n\nCENTS_PER_UNIT = 100\n\n#: 满 100 元（即 10000 分）才可享受折扣\nDISCOUNT_THRESHOLD_CENTS = 10000\n\n\ndef is_discount_eligible(total_cents: int) -> bool:\n    \"\"\"订单总额是否达到折扣门槛。\"\"\"\n    return total_cents >= DISCOUNT_THRESHOLD_CENTS\n\n\ndef apply_discount(total_cents: int, discount_rate: float) -> int:\n    \"\"\"按折扣率打折，返回打折后的金额（单位：分）。\n\n    规则（见 SPEC-001）：折扣后金额四舍五入到分。\n    \"\"\"\n    discounted = total_cents * (1 - discount_rate)\n    return int(round(discounted))\n",
+      "status": "active",
+      "version": 0,
+      "priority": 0,
+      "source": "app/pricing.py",
+      "scope": [
+        "app/pricing.py"
+      ],
+      "tags": [
+        "code"
+      ],
+      "keywords": [
+        "pricing"
+      ]
+    }
+  ],
+  "selection": {
+    "backend": "seekdb/oceanbase (pymysql, MySQL protocol)",
+    "table": "sdd_artifacts",
+    "task": "订单明细按小计筛选（ORDER-FILTER-001）：Order.expensive_items(min_subtotal_cents)，边界阈值 0 返回全部",
+    "keywords": [
+      "订单明细按小计筛选（ORDER-FILTER-001）：Order.expensive_items(min_subtotal_cents)",
+      "边界阈值",
+      "0",
+      "返回全部"
+    ],
+    "matched_ids": [
+      "SPEC-001",
+      "SPEC-003",
+      "SPEC-101",
+      "SPEC-004",
+      "ADR-004",
+      "ADR-101",
+      "VERIFY-101",
+      "VERIFY-004",
+      "tests/test_order_filter.py",
+      "tests/test_payment_retry_legacy.py",
+      "app/order.py",
+      "app/payment.py",
+      "app/pricing.py"
+    ],
+    "related_ids": [
+      "app/order.py",
+      "app/payment.py",
+      "app/pricing.py"
+    ]
+  }
+}

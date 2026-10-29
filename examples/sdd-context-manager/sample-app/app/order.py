@@ -29,3 +29,14 @@ class Order:
         if not is_discount_eligible(subtotal) or not self.discount_rate:
             return subtotal
         return apply_discount(subtotal, self.discount_rate)
+
+    def expensive_items(self, min_subtotal_cents: int):
+        """筛选小计不低于 ``min_subtotal_cents`` 的商品明细，按小计降序。
+
+        小计 = 数量 × 单价（分）。同小计的明细保持输入顺序；
+        ``min_subtotal_cents <= 0`` 时视为 0，返回全部明细（同样按小计降序）。
+        """
+        threshold = max(int(min_subtotal_cents), 0)
+        picked = [item for item in self.items if item[0] * item[1] >= threshold]
+        picked.sort(key=lambda item: item[0] * item[1], reverse=True)
+        return picked

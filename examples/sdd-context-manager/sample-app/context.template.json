@@ -13,9 +13,24 @@
       "priority": 10,
       "effective_from": "2026-03-01",
       "updated_at": "2026-03-01",
-      "scope": ["app/pricing.py", "app/order.py"],
-      "tags": ["pricing", "order", "money"],
-      "keywords": ["折扣", "总价", "取整", "四舍五入", "金额", "定价", "订单"],
+      "scope": [
+        "app/pricing.py",
+        "app/order.py"
+      ],
+      "tags": [
+        "pricing",
+        "order",
+        "money"
+      ],
+      "keywords": [
+        "折扣",
+        "总价",
+        "取整",
+        "四舍五入",
+        "金额",
+        "定价",
+        "订单"
+      ],
       "conflict_key": "pricing-rule",
       "source": "docs/requirements.md"
     },
@@ -32,9 +47,18 @@
       "updated_at": "2026-06-20",
       "superseded_by": "SPEC-003",
       "supersede_reason": "固定重试在网关抖动时会放大压力",
-      "scope": ["app/payment.py"],
-      "tags": ["payment", "retry"],
-      "keywords": ["支付", "重试", "超时"],
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "payment",
+        "retry"
+      ],
+      "keywords": [
+        "支付",
+        "重试",
+        "超时"
+      ],
       "conflict_key": "payment-retry",
       "source": "docs/requirements.md"
     },
@@ -49,10 +73,22 @@
       "priority": 10,
       "effective_from": "2026-06-20",
       "updated_at": "2026-06-20",
-      "supersedes": ["SPEC-002"],
-      "scope": ["app/payment.py"],
-      "tags": ["payment", "retry"],
-      "keywords": ["支付", "重试", "超时", "退避"],
+      "supersedes": [
+        "SPEC-002"
+      ],
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "payment",
+        "retry"
+      ],
+      "keywords": [
+        "支付",
+        "重试",
+        "超时",
+        "退避"
+      ],
       "conflict_key": "payment-retry",
       "source": "docs/requirements.md"
     },
@@ -67,9 +103,19 @@
       "priority": 0,
       "effective_from": "2026-02-01",
       "updated_at": "2026-02-01",
-      "scope": ["app/payment.py"],
-      "tags": ["payment", "retry", "legacy"],
-      "keywords": ["支付", "重试", "超时"],
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "payment",
+        "retry",
+        "legacy"
+      ],
+      "keywords": [
+        "支付",
+        "重试",
+        "超时"
+      ],
       "conflict_key": "payment-retry",
       "source": "docs/requirements.md"
     },
@@ -84,9 +130,20 @@
       "priority": 0,
       "effective_from": "2026-01-10",
       "updated_at": "2026-01-10",
-      "scope": ["app/pricing.py", "app/order.py"],
-      "tags": ["pricing", "order", "legacy"],
-      "keywords": ["折扣", "取整", "金额"],
+      "scope": [
+        "app/pricing.py",
+        "app/order.py"
+      ],
+      "tags": [
+        "pricing",
+        "order",
+        "legacy"
+      ],
+      "keywords": [
+        "折扣",
+        "取整",
+        "金额"
+      ],
       "conflict_key": "pricing-rule",
       "source": "docs/requirements.md"
     },
@@ -101,9 +158,21 @@
       "priority": 10,
       "effective_from": "2026-02-01",
       "updated_at": "2026-06-20",
-      "scope": ["app/payment.py"],
-      "tags": ["api", "payment", "contract"],
-      "keywords": ["支付", "接口", "契约", "charge", "支付网关"],
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "api",
+        "payment",
+        "contract"
+      ],
+      "keywords": [
+        "支付",
+        "接口",
+        "契约",
+        "charge",
+        "支付网关"
+      ],
       "source": "app/payment.py"
     },
     {
@@ -117,9 +186,19 @@
       "priority": 10,
       "effective_from": "2026-01-05",
       "updated_at": "2026-01-05",
-      "scope": ["app/**"],
-      "tags": ["money", "decision"],
-      "keywords": ["金额", "分", "整数", "精度"],
+      "scope": [
+        "app/**"
+      ],
+      "tags": [
+        "money",
+        "decision"
+      ],
+      "keywords": [
+        "金额",
+        "分",
+        "整数",
+        "精度"
+      ],
       "source": "docs/decisions.md"
     },
     {
@@ -135,9 +214,19 @@
       "updated_at": "2026-03-01",
       "superseded_by": "ADR-003",
       "supersede_reason": "客户端可篡改折后金额，存在资损风险",
-      "scope": ["app/pricing.py", "app/order.py"],
-      "tags": ["pricing", "decision"],
-      "keywords": ["折扣", "客户端", "信任"],
+      "scope": [
+        "app/pricing.py",
+        "app/order.py"
+      ],
+      "tags": [
+        "pricing",
+        "decision"
+      ],
+      "keywords": [
+        "折扣",
+        "客户端",
+        "信任"
+      ],
       "source": "docs/decisions.md"
     },
     {
@@ -151,10 +240,22 @@
       "priority": 10,
       "effective_from": "2026-03-01",
       "updated_at": "2026-03-01",
-      "supersedes": ["ADR-002"],
-      "scope": ["app/pricing.py", "app/order.py"],
-      "tags": ["pricing", "decision"],
-      "keywords": ["折扣", "服务端", "订单"],
+      "supersedes": [
+        "ADR-002"
+      ],
+      "scope": [
+        "app/pricing.py",
+        "app/order.py"
+      ],
+      "tags": [
+        "pricing",
+        "decision"
+      ],
+      "keywords": [
+        "折扣",
+        "服务端",
+        "订单"
+      ],
       "source": "docs/decisions.md"
     },
     {
@@ -168,9 +269,18 @@
       "priority": 10,
       "effective_from": "2026-04-02",
       "updated_at": "2026-04-02",
-      "scope": ["app/payment.py"],
-      "tags": ["payment", "decision"],
-      "keywords": ["重试", "退避", "支付"],
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "payment",
+        "decision"
+      ],
+      "keywords": [
+        "重试",
+        "退避",
+        "支付"
+      ],
       "source": "docs/decisions.md"
     },
     {
@@ -182,13 +292,27 @@
       "version": 1,
       "priority": 10,
       "updated_at": "2026-03-01",
-      "scope": ["app/pricing.py"],
-      "tags": ["test", "pricing"],
-      "keywords": ["折扣", "取整", "定价", "测试"],
+      "scope": [
+        "app/pricing.py"
+      ],
+      "tags": [
+        "test",
+        "pricing"
+      ],
+      "keywords": [
+        "折扣",
+        "取整",
+        "定价",
+        "测试"
+      ],
       "source": "tests/test_pricing.py",
-      "targets": ["app/pricing.py"],
+      "targets": [
+        "app/pricing.py"
+      ],
       "test_path": "tests/test_pricing.py",
-      "validates": ["SPEC-001"],
+      "validates": [
+        "SPEC-001"
+      ],
       "command": "python -m unittest discover -s tests",
       "recorded_at": "2026-03-01"
     },
@@ -201,13 +325,26 @@
       "version": 1,
       "priority": 10,
       "updated_at": "2026-03-01",
-      "scope": ["app/order.py"],
-      "tags": ["test", "order"],
-      "keywords": ["订单", "总价", "测试"],
+      "scope": [
+        "app/order.py"
+      ],
+      "tags": [
+        "test",
+        "order"
+      ],
+      "keywords": [
+        "订单",
+        "总价",
+        "测试"
+      ],
       "source": "tests/test_order.py",
-      "targets": ["app/order.py"],
+      "targets": [
+        "app/order.py"
+      ],
       "test_path": "tests/test_order.py",
-      "validates": ["SPEC-001"],
+      "validates": [
+        "SPEC-001"
+      ],
       "command": "python -m unittest discover -s tests",
       "recorded_at": "2026-03-01"
     },
@@ -220,13 +357,27 @@
       "version": 1,
       "priority": 10,
       "updated_at": "2026-06-20",
-      "scope": ["app/payment.py"],
-      "tags": ["test", "payment"],
-      "keywords": ["支付", "接口", "测试"],
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "test",
+        "payment"
+      ],
+      "keywords": [
+        "支付",
+        "接口",
+        "测试"
+      ],
       "source": "tests/test_payment.py",
-      "targets": ["app/payment.py"],
+      "targets": [
+        "app/payment.py"
+      ],
       "test_path": "tests/test_payment.py",
-      "validates": ["SPEC-003", "CTR-001"],
+      "validates": [
+        "SPEC-003",
+        "CTR-001"
+      ],
       "command": "python -m unittest discover -s tests",
       "recorded_at": "2026-06-20"
     },
@@ -239,15 +390,115 @@
       "version": 1,
       "priority": 0,
       "updated_at": "2026-02-01",
-      "scope": ["app/payment.py"],
-      "tags": ["test", "payment", "legacy"],
-      "keywords": ["重试", "超时", "支付"],
+      "scope": [
+        "app/payment.py"
+      ],
+      "tags": [
+        "test",
+        "payment",
+        "legacy"
+      ],
+      "keywords": [
+        "重试",
+        "超时",
+        "支付"
+      ],
       "source": "tests/test_payment_retry_legacy.py",
-      "targets": ["app/payment.py"],
+      "targets": [
+        "app/payment.py"
+      ],
       "test_path": "tests/test_payment_retry_legacy.py",
-      "validates": ["SPEC-002"],
+      "validates": [
+        "SPEC-002"
+      ],
       "command": "python -m unittest discover -s tests",
       "recorded_at": "2026-02-01"
+    },
+    {
+      "id": "SPEC-101",
+      "kind": "spec",
+      "title": "订单明细按小计筛选",
+      "summary": "Order.expensive_items 按商品小计筛选明细，降序返回，阈值<=0 视为 0。",
+      "body": "1. 小计 = 数量 × 单价（分），保留小计不低于阈值的明细。\n2. 结果按小计降序，同小计保持输入顺序。\n3. 阈值 <= 0 视为 0，返回全部明细（同样降序）。\n4. 不改变订单总价与折扣规则（SPEC-001）。",
+      "status": "active",
+      "version": 1,
+      "priority": 8,
+      "effective_from": "2026-06-01",
+      "updated_at": "2026-06-01",
+      "scope": [
+        "app/order.py"
+      ],
+      "tags": [
+        "order",
+        "filter"
+      ],
+      "keywords": [
+        "筛选",
+        "明细",
+        "小计",
+        "降序",
+        "订单"
+      ],
+      "source": "docs/requirements.md"
+    },
+    {
+      "id": "ADR-101",
+      "kind": "decision",
+      "title": "明细筛选的排序与边界语义",
+      "summary": "筛选结果按小计降序、稳定排序；阈值<=0 统一按 0 处理。",
+      "body": "决定：稳定排序降序；阈值 <= 0 视为 0。",
+      "status": "active",
+      "version": 1,
+      "priority": 6,
+      "effective_from": "2026-06-01",
+      "updated_at": "2026-06-01",
+      "scope": [
+        "app/order.py"
+      ],
+      "tags": [
+        "order",
+        "filter"
+      ],
+      "keywords": [
+        "排序",
+        "边界",
+        "筛选"
+      ],
+      "source": "docs/decisions.md"
+    },
+    {
+      "id": "VERIFY-101",
+      "kind": "verification",
+      "title": "订单明细筛选目标测试",
+      "summary": "验证 expensive_items 的筛选、排序与边界阈值行为",
+      "status": "active",
+      "version": 1,
+      "priority": 9,
+      "updated_at": "2026-06-01",
+      "scope": [
+        "app/order.py"
+      ],
+      "tags": [
+        "test",
+        "order"
+      ],
+      "keywords": [
+        "筛选",
+        "测试",
+        "边界",
+        "订单"
+      ],
+      "source": "tests/test_order_filter.py",
+      "targets": [
+        "app/order.py"
+      ],
+      "test_path": "tests/test_order_filter.py",
+      "validates": [
+        "SPEC-101",
+        "ADR-101"
+      ],
+      "command": "python -m unittest tests.test_order_filter -v",
+      "recorded_at": "2026-06-01"
     }
   ]
 }
